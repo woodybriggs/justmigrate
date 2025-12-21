@@ -3,667 +3,1566 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
+	"strconv"
+	"strings"
 )
 
-type ParseError struct {
-	err   error
-	token Token
-	lexer *Lexer
-}
-
-func (p *ParseError) Join(err error) *ParseError {
-	p.err = errors.Join(err, p.err)
-	return p
-}
-
-func (p *ParseError) Error() string {
-	loc := p.lexer.GetLocation(p.token)
-	return fmt.Sprintf("%s:%d:%d\n%s", loc.FileName, loc.Line, loc.Col, p.err)
-}
+func unused[T any](value T) {}
 
 type Parser struct {
-	lexer       *Lexer
-	parseerrors []ParseError
+	CurrentToken Token
+	PeekedToken  Token
+	tokenizer    *Tokenizer
 }
 
-func (p *Parser) NewParseError(err error, token Token) *ParseError {
-	return &ParseError{
-		err:   err,
-		token: token,
-		lexer: p.lexer,
-	}
-}
+func NewParser(tokenizer *Tokenizer) *Parser {
 
-func (p *Parser) ReportError(err ParseError, token Token) {
-	p.parseerrors = append(p.parseerrors, err)
-	location := p.lexer.GetLocation(token)
-	fmt.Printf(
-		"%s:%d:%d\n\t%s\n",
-		location.FileName,
-		location.Line,
-		location.Col,
-		err.Error(),
-	)
-	if len(p.parseerrors) >= 10 {
-		fmt.Println("too many errors")
-		os.Exit(1)
+	result := &Parser{
+		tokenizer: tokenizer,
 	}
-}
 
-func (p *Parser) HasErrors() bool {
-	return len(p.parseerrors) > 0
-}
+	result.CurrentToken = tokenizer.NextToken()
+	result.PeekedToken = tokenizer.PeekToken()
 
-func (p *Parser) AcceptToken(kind TokenKind) (Token, bool, []Token) {
-	var comments []Token = nil
-	peeked := p.lexer.PeekToken(1)
-	if peeked.Kind == TokenKind_Comment {
-		comments = append(comments, peeked)
-	}
-	if peeked.Kind != kind {
-		return Token{}, false, comments
-	}
-	return p.lexer.ConsumeToken(), true, comments
-}
-
-func (p *Parser) ConsumeToken() Token {
-	return p.lexer.ConsumeToken()
-}
-
-func (p *Parser) MakeComments(comments []Token) []AstNode_Comment {
-	if comments == nil {
-		return nil
-	}
-	if len(comments) == 0 {
-		return nil
-	}
-	result := make([]AstNode_Comment, len(comments))
-	for i, comment := range comments {
-		result[i] = AstNode_Comment{
-			Comment: comment,
-		}
-	}
 	return result
 }
 
-func (p *Parser) Statements() *AstNode_Statements {
-	stmts := &AstNode_Statements{
-		Statements: make([]AstNode, 0),
-	}
-
-	for !p.lexer.Eof() {
-		stmt, err := p.Statement()
-		if err != nil {
-			fmt.Println(err)
-			return nil
-		}
-		stmts.Statements = append(stmts.Statements, stmt)
-	}
-
-	return stmts
+func (p *Parser) Advance() {
+	p.CurrentToken = p.tokenizer.NextToken()
+	p.PeekedToken = p.tokenizer.PeekToken()
 }
 
-func (p *Parser) Statement() (AstNode, error) {
-	var stmt *AstNode_Statement = &AstNode_Statement{}
+func (p *Parser) Expect(kind TokenKind) (Token, *Error) {
+	if p.CurrentToken.Kind == kind {
+		token := p.CurrentToken
+		p.Advance()
+		return token, nil
+	}
 
-	explain, err := p.Keyword(TokenKind_Keyword_EXPLAIN)
-	if err == nil {
-		stmt.Explain = explain
+	return Token{}, NewError(
+		fmt.Errorf("expected '%s' got '%s'", kind.DebugString(), p.CurrentToken.DebugString()),
+		p.CurrentToken,
+		p.tokenizer.TokenizerData,
+		p.tokenizer.SourceCode,
+	)
+}
 
-		query, err := p.Keyword(TokenKind_Keyword_QUERY)
-		if err == nil {
-			stmt.Query = query
+func (p *Parser) Statements() []AstNode {
 
-			plan, err := p.Keyword(TokenKind_Keyword_PLAN)
-			if err != nil {
-				return nil, p.NewParseError(errors.New("expected 'PLAN' after 'QUERY' in Statement"), query.Keyword)
-			}
-			stmt.Plan = plan
+	var statements []AstNode = nil
+
+	for !p.tokenizer.Eof() {
+		statement := p.Statement()
+		statements = append(statements, statement)
+		if _, err := p.Expect(';'); err != nil {
+			statements = append(statements, err)
 		}
 	}
 
-	token := p.lexer.PeekToken(1)
-	switch token.Kind {
+	return statements
+}
+
+func (p *Parser) Statement() (result Statement) {
+	switch token := p.CurrentToken; token.Kind {
+	case TokenKind_Keyword_PRAMGA:
+		return p.PragmaStatement()
 	case TokenKind_Keyword_CREATE:
-		create, err := p.Keyword(TokenKind_Keyword_CREATE)
-		if err != nil {
-			return nil, err
-		}
-		temporary, _ := p.Keyword(TokenKind_Keyword_TEMPORARY)
-		catalogObj := p.ConsumeToken()
-		switch catalogObj.Kind {
-		case TokenKind_Keyword_TABLE:
-			table := &AstNode_Keyword{Keyword: catalogObj}
-			statement, err := p.CreateTableStatement(create, table, temporary)
-			if err != nil {
-				return nil, err
+		return p.CreateStatement()
+	case TokenKind_Keyword_BEGIN:
+		return p.BeginStatement()
+	case TokenKind_Keyword_COMMIT:
+		p.Advance()
+		return &CommitTransaction{}
+	default:
+		return NewError(
+			fmt.Errorf("expected statement opening keyword 'create', 'drop' or 'alter'"),
+			token,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
+	}
+}
+
+func (p *Parser) BeginStatement() (result Statement) {
+
+	if _, err := p.Expect(TokenKind_Keyword_BEGIN); err != nil {
+		return err
+	}
+
+	if _, err := p.Expect(TokenKind_Keyword_TRANSACTION); err != nil {
+		return err
+	}
+
+	return &BeginTransaction{}
+}
+
+func (p *Parser) PragmaStatement() (result Statement) {
+
+	if _, err := p.Expect(TokenKind_Keyword_PRAMGA); err != nil {
+		return err
+	}
+
+	pragmaIdentifier := p.CatalogObjectIdentifier()
+	if err, isErr := pragmaIdentifier.(*Error); isErr {
+		return err
+	}
+
+	switch token := p.CurrentToken; token.Kind {
+	case '=':
+		{
+			p.Advance()
+			pragmaValue := p.PragmaValue()
+			return &Pragma{
+				Name:  pragmaIdentifier,
+				Value: pragmaValue,
 			}
-			stmt.Statement = statement
-		default:
-			return nil, p.NewParseError(errors.New("expected catalog object in create statement"), catalogObj)
+		}
+	case '(':
+		{
+			p.Advance()
+			pragmaValue := p.PragmaValue()
+			if _, err := p.Expect(')'); err != nil {
+				return err
+			}
+			return &Pragma{
+				Name:  pragmaIdentifier,
+				Value: pragmaValue,
+			}
 		}
 	default:
-		return nil, p.NewParseError(errors.New("unsupported"), token)
+		p.Advance()
+		return NewError(
+			fmt.Errorf("expected '=' or parentheses for pragma value"),
+			token,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
 	}
-
-	semi, ok, comments := p.AcceptToken(TokenKind_SemiColon)
-	if !ok {
-		return nil, p.NewParseError(errors.New("expected semicolon at end of statement"), semi)
-	}
-	if comments != nil {
-		stmt.Comments = append(stmt.Comments, p.MakeComments(comments)...)
-	}
-
-	return stmt, nil
 }
 
-func (p *Parser) CreateTableStatement(create *AstNode_Keyword, temporary *AstNode_Keyword, table *AstNode_Keyword) (*AstNode_CreateTableStmt, error) {
-
-	createTableStmt := &AstNode_CreateTableStmt{
-		Create:    create,
-		Table:     table,
-		Temporary: temporary,
+func (p *Parser) PragmaValue() (result PragmaValue) {
+	switch token := p.CurrentToken; token.Kind {
+	case TokenKind_DecimalNumericLiteral:
+		p.Advance()
+		return &LiteralNumber{
+			Token: token,
+			Value: p.TokenToNumber(token),
+		}
+	case TokenKind_Identifier:
+		p.Advance()
+		return &token
+	case TokenKind_StringLiteral:
+		p.Advance()
+		return &LiteralString{
+			Token: token,
+			Value: token.Text,
+		}
+	case TokenKind_Keyword_TRUE, TokenKind_Keyword_FALSE, TokenKind_Keyword_ON:
+		p.Advance()
+		return &LiteralBoolean{
+			Token: token,
+			Value: p.TokenToBoolean(token),
+		}
+	default:
+		if p.PeekedToken.Kind == ';' {
+			// assume we got a value, to keep the parser going.
+			p.Advance()
+		}
+		return NewError(
+			fmt.Errorf("expected pragma value"),
+			token,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
 	}
-
-	ifnotexits, err := p.IfNotExists()
-	if err != nil {
-		return nil, err.(*ParseError).Join(errors.New("expected if not exists"))
-	}
-
-	tableIdentifier, err := p.TableIdentifier()
-	if err != nil {
-		return nil, errors.Join(err, errors.New("expected table identfier"))
-	}
-	tableDefinition, err := p.TableDefinition()
-	if err != nil {
-		return nil, errors.Join(err, errors.New("expected table definition"))
-	}
-	// createTableStmt.TableOptions = p.TableOptions()
-
-	createTableStmt.IfNotExists = ifnotexits
-	createTableStmt.TableIdentifier = tableIdentifier
-	createTableStmt.TableDefinition = tableDefinition
-
-	return createTableStmt, nil
 }
 
-func TokensToStrings(tokens []TokenKind) []string {
-	result := make([]string, len(tokens))
-	for i, token := range tokens {
-		result[i] = token.String()
+func (p *Parser) CreateStatement() (result Statement) {
+
+	if _, err := p.Expect(TokenKind_Keyword_CREATE); err != nil {
+		return err
 	}
-	return result
+
+	switch token := p.CurrentToken; token.Kind {
+	case TokenKind_Keyword_TABLE:
+		return p.CreateTableStatement(false)
+	case TokenKind_Keyword_VIEW:
+		return p.CreateViewStatement(false)
+	case TokenKind_Keyword_TRIGGER:
+		return p.CreateTriggerStatement(false)
+	case TokenKind_Keyword_INDEX:
+		return p.CreateIndexStatement(false)
+	case TokenKind_Keyword_UNIQUE:
+		return p.CreateIndexStatement(true)
+	case TokenKind_Keyword_VIRTUAL:
+		return p.CreateVirtualTableStatement()
+	case TokenKind_Keyword_TEMPORARY:
+		return p.CreateTemporaryStatement()
+	default:
+		panic(fmt.Sprintf("'create '%s' statement is not implemented", token.Text))
+	}
 }
 
-func (p *Parser) IfNotExists() (AstNode_KeywordList, error) {
-	if_, _ := p.Keyword(TokenKind_Keyword_IF)
-	if if_ == nil {
-		return nil, nil
+func (p *Parser) CreateTemporaryStatement() Statement {
+
+	if _, err := p.Expect(TokenKind_Keyword_TEMPORARY); err != nil {
+		return err
 	}
 
-	not, err := p.Keyword(TokenKind_Keyword_NOT)
-	if err != nil {
-		return nil, err
+	switch token := p.CurrentToken; token.Kind {
+	case TokenKind_Keyword_TABLE:
+		return p.CreateTableStatement(true)
+	case TokenKind_Keyword_VIEW:
+		return p.CreateViewStatement(true)
+	case TokenKind_Keyword_TRIGGER:
+		return p.CreateTriggerStatement(true)
+	default:
+		return NewError(
+			errors.New("unexpected token after 'temporary' keyword"),
+			token,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
 	}
-
-	exists, err := p.Keyword(TokenKind_Keyword_EXISTS)
-	if err != nil {
-		return nil, err
-	}
-
-	return AstNode_KeywordList{*if_, *not, *exists}, nil
 }
 
-func (p *Parser) Keyword(keyword TokenKind) (*AstNode_Keyword, *ParseError) {
-	kword, ok, comments := p.AcceptToken(keyword)
-	if !ok {
-		keywordstr, _ := keywordIndex.GetKey(keyword)
-		return nil, p.NewParseError(fmt.Errorf("expected keyword %s", keywordstr), kword)
-	}
-	return &AstNode_Keyword{
-		Keyword:  kword,
-		Comments: p.MakeComments(comments),
-	}, nil
+func (p *Parser) CreateViewStatement(temporary bool) (result Statement) {
 
+	if temporary {
+		if _, err := p.Expect(TokenKind_Keyword_TEMPORARY); err != nil {
+			return err
+		}
+	}
+
+	if _, err := p.Expect(TokenKind_Keyword_VIEW); err != nil {
+		return err
+	}
+
+	_, ifnotexists := p.IfNotExists().(*IfNotExists)
+
+	viewIdentifier := p.CatalogObjectIdentifier()
+
+	columnNames := []Identifier{}
+	if p.CurrentToken.Kind == '(' {
+
+	ColumnNamesLoop:
+		for !p.tokenizer.Eof() {
+			switch p.CurrentToken.Kind {
+			case ',':
+				p.Advance()
+				continue
+			case ')':
+				break ColumnNamesLoop
+			default:
+				columnName := p.Identifier()
+				columnNames = append(columnNames, columnName)
+			}
+		}
+
+		if _, err := p.Expect(')'); err != nil {
+			return err
+		}
+	}
+
+	if _, err := p.Expect(TokenKind_Keyword_AS); err != nil {
+		return err
+	}
+
+	selectStmt := p.SelectStatement()
+	return &CreateView{
+		IfNotExists:    ifnotexists,
+		Columns:        columnNames,
+		ViewIdentifier: viewIdentifier,
+		AsSelect:       selectStmt,
+	}
 }
 
-func (p *Parser) TableIdentifier() (*AstNode_TableIdentifer, error) {
+func (p *Parser) CreateTriggerStatement(temporary bool) (result Statement) {
 
-	schemaOrTable, err := p.Identifier()
-	if err != nil {
-		return nil, errors.Join(err)
+	if _, err := p.Expect(TokenKind_Keyword_TRIGGER); err != nil {
+		return err
 	}
 
-	_, ok, periodcomments := p.AcceptToken(TokenKind_Period)
-	if !ok {
-		return &AstNode_TableIdentifer{
-			TableName: schemaOrTable,
-			Comments:  p.MakeComments(periodcomments),
-		}, nil
+	for p.CurrentToken.Kind != TokenKind_Keyword_BEGIN {
+		p.Advance()
 	}
-
-	table, err := p.Identifier()
-	if err != nil {
-		return nil, errors.Join(err, errors.New("expected table name after schema name"))
+	p.Advance()
+	for p.CurrentToken.Kind != ';' {
+		p.Advance()
 	}
+	p.Advance()
+	for p.CurrentToken.Kind != TokenKind_Keyword_END {
+		p.Advance()
+	}
+	p.Advance()
 
-	return &AstNode_TableIdentifer{
-		SchemaName: schemaOrTable,
-		TableName:  table,
-	}, nil
+	return &CreateTrigger{}
 }
 
-func (p *Parser) TableDefinition() (*AstNode_TableDefinition, error) {
-	lparen, ok, _ /*lparencomments*/ := p.AcceptToken(TokenKind_LParen)
-	if !ok {
-		return nil, p.NewParseError(errors.New("expected '(' at start of column definitions"), lparen)
+func (p *Parser) SelectStatement() Statement {
+
+	if _, err := p.Expect(TokenKind_Keyword_SELECT); err != nil {
+		return err
 	}
 
-	columnDefs, err := p.ColumnDefinitions()
-	if err != nil {
-		return nil, err
-	}
-	tableConstraints, err := p.TableConstraints(columnDefs)
-	if err != nil {
-		return nil, err
+	for !p.tokenizer.Eof() {
+		if p.CurrentToken.Kind == ';' {
+			break
+		}
+		p.Advance()
 	}
 
-	rparen, ok, _ /*rparencomments*/ := p.AcceptToken(TokenKind_RParen)
-	if !ok {
-		return nil, p.NewParseError(errors.New("expected ')' at end of table definition"), rparen)
+	return &Select{}
+}
+
+func (p *Parser) CreateTableStatement(isTemporary bool) Statement {
+
+	if _, err := p.Expect(TokenKind_Keyword_TABLE); err != nil {
+		return err
 	}
 
-	return &AstNode_TableDefinition{
+	_, ifnotexists := p.IfNotExists().(*IfNotExists)
+
+	tableIdentifier := p.CatalogObjectIdentifier()
+	if err, isErr := tableIdentifier.(*Error); isErr {
+		return err
+	}
+
+	tableDefinition := p.TableDefinition()
+	if err, isErr := tableDefinition.(*Error); isErr {
+		return err
+	}
+
+	tableOptions := p.TableOptions()
+
+	return &CreateTable{
+		IsTemporary:     isTemporary,
+		IfNotExist:      ifnotexists,
+		TableIdentifier: tableIdentifier,
+		TableDefinition: tableDefinition,
+		TableOptions:    tableOptions,
+	}
+}
+
+func (p *Parser) CreateVirtualTableStatement() Statement {
+
+	if _, err := p.Expect(TokenKind_Keyword_VIRTUAL); err != nil {
+		return err
+	}
+
+	if _, err := p.Expect(TokenKind_Keyword_TABLE); err != nil {
+		return err
+	}
+
+	_, ifnotexists := p.IfNotExists().(*IfNotExists)
+
+	tableIdentifier := p.CatalogObjectIdentifier()
+	if err, isErr := tableIdentifier.(*Error); isErr {
+		return err
+	}
+
+	if _, err := p.Expect(TokenKind_Keyword_USING); err != nil {
+		return err
+	}
+
+	moduleName := p.Identifier()
+	if err, isErr := moduleName.(*Error); isErr {
+		return err
+	}
+
+	args := []string{}
+	if p.CurrentToken.Kind == '(' {
+		p.Advance()
+		str := string("")
+	ModuleArgsLoop:
+		for !p.tokenizer.Eof() {
+			switch token := p.CurrentToken; token.Kind {
+			case ',':
+				p.Advance()
+				args = append(args, str)
+				str = string("")
+				continue
+			case ')':
+				args = append(args, str)
+				str = string("")
+				break ModuleArgsLoop
+			default:
+				p.Advance()
+				str = strings.Join([]string{str, token.Text}, "")
+			}
+		}
+
+		if _, err := p.Expect(')'); err != nil {
+			return err
+		}
+	}
+
+	return &CreateVirtualTable{
+		IfNotExist:      ifnotexists,
+		TableIdentifier: tableIdentifier,
+		ModuleName:      moduleName,
+		ModuleArgs:      args,
+	}
+}
+
+func (p *Parser) CreateIndexStatement(unique bool) Statement {
+
+	if unique {
+		p.Expect(TokenKind_Keyword_UNIQUE)
+	}
+
+	if _, err := p.Expect(TokenKind_Keyword_INDEX); err != nil {
+		return err
+	}
+
+	_, ifnotexists := p.IfNotExists().(*IfNotExists)
+
+	indexIdentifier := p.CatalogObjectIdentifier()
+	if err, isErr := indexIdentifier.(*Error); isErr {
+		return err
+	}
+
+	if _, err := p.Expect(TokenKind_Keyword_ON); err != nil {
+		return err
+	}
+
+	tableName := p.Identifier()
+	if err, isErr := tableName.(*Error); isErr {
+		return err
+	}
+
+	if _, err := p.Expect('('); err != nil {
+		return err
+	}
+
+	indexedColumns := []AstNode{}
+IndexedColumnsLoop:
+	for !p.tokenizer.Eof() {
+		switch p.CurrentToken.Kind {
+		case ',':
+			p.Advance()
+			continue
+		case ')':
+			break IndexedColumnsLoop
+		default:
+			indexedColumn := p.IndexedColumn(true)
+			indexedColumns = append(indexedColumns, indexedColumn)
+		}
+	}
+
+	if _, err := p.Expect(')'); err != nil {
+		return err
+	}
+
+	var whereExpr Expr = nil
+	if p.CurrentToken.Kind == TokenKind_Keyword_WHERE {
+		p.Advance()
+		whereExpr = p.Expr(0)
+	}
+
+	return &CreateIndex{
+		Unique:          unique,
+		IfNotExists:     ifnotexists,
+		IndexIdentifier: indexIdentifier,
+		OnTable:         tableName,
+		IndexedColumns:  indexedColumns,
+		WhereExpr:       whereExpr,
+	}
+}
+
+func (p *Parser) IndexedColumn(allowExpressions bool) AstNode {
+
+	var indexSubject AstNode = nil
+	if allowExpressions {
+		indexSubject = p.Expr(0)
+	} else {
+		indexSubject = p.Identifier()
+	}
+
+	var collationName Identifier = nil
+	if p.CurrentToken.Kind == TokenKind_Keyword_COLLATE {
+		p.Advance()
+		collationName := p.Identifier()
+		if err, isErr := collationName.(*Error); isErr {
+			return err
+		}
+	}
+
+	order := p.MaybeOrderBy()
+
+	return &IndexedColumn{
+		Subject:       indexSubject,
+		CollationName: collationName,
+		Order:         order,
+	}
+}
+
+func (p *Parser) IfNotExists() AstNode {
+	if p.CurrentToken.Kind != TokenKind_Keyword_IF {
+		return nil
+	}
+	p.Advance()
+
+	if _, err := p.Expect(TokenKind_Keyword_NOT); err != nil {
+		return err
+	}
+	if _, err := p.Expect(TokenKind_Keyword_EXISTS); err != nil {
+		return err
+	}
+
+	return &IfNotExists{}
+}
+
+func (p *Parser) CatalogObjectIdentifier() AstNode {
+
+	schemaOrTable := p.Identifier()
+	if err, isErr := schemaOrTable.(*Error); isErr {
+		return NewError(
+			fmt.Errorf("%w: for 'schema' or 'object (table, index, trigger, view, etc)' name", err),
+			err.OffendingToken,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
+	}
+
+	if p.CurrentToken.Kind != TokenKind_Period {
+		return &CatalogObjectIdentifier{
+			SchemaName: nil,
+			ObjectName: schemaOrTable,
+		}
+	}
+	p.Advance()
+
+	schema := schemaOrTable
+	table := p.Identifier()
+	if err, isErr := table.(*Error); isErr {
+		return NewError(
+			fmt.Errorf("%w: for 'object (table, index, trigger, view, etc)' name", err),
+			err.OffendingToken,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
+	}
+
+	return &CatalogObjectIdentifier{
+		SchemaName: schema,
+		ObjectName: table,
+	}
+}
+
+func (p *Parser) TableDefinition() AstNode {
+	if _, err := p.Expect('('); err != nil {
+		return NewError(
+			fmt.Errorf("%w: starting of table definition", err),
+			err.OffendingToken,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
+	}
+
+	columnDefs := p.ColumnDefinitions()
+	tableConstraints := p.TableConstraints()
+
+	if _, err := p.Expect(')'); err != nil {
+		return NewError(
+			fmt.Errorf("%w: ending of table definition", err),
+			err.OffendingToken,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
+	}
+
+	return &TableDefinition{
 		ColumnDefinitions: columnDefs,
 		TableConstraints:  tableConstraints,
-	}, nil
+	}
 }
 
-func IsColumnDefinitionsTerminal(token Token) bool {
-	if token.Kind == TokenKind_RParen {
-		return true
+func (p *Parser) ColumnDefinitions() []AstNode {
+
+	definitions := []AstNode{}
+
+ColumnDefinitionsLoop:
+	for !p.tokenizer.Eof() {
+		switch token := p.CurrentToken; {
+		case token.Kind == ',':
+			p.Advance()
+			continue
+		case token.Kind == ')':
+			break ColumnDefinitionsLoop
+		case isConstraintKeyword(token):
+			break ColumnDefinitionsLoop
+		default:
+			columnDef := p.ColumnDefinition()
+			definitions = append(definitions, columnDef)
+		}
 	}
+
+	return definitions
+}
+
+func isConstraintKeyword(token Token) bool {
 	_, ok := constaintKeywords[token.Kind]
 	return ok
 }
 
-func (p *Parser) ColumnDefinitions() (*AstNode_ColumnDefinitions, error) {
+func (p *Parser) ColumnDefinition() AstNode {
 
-	node := &AstNode_ColumnDefinitions{
-		Definitions: []AstNode{},
-	}
+	columnName := p.Identifier()
+	typeName := p.TypeName()
+	columnConstraints := p.ColumnConstraints()
 
-	token := p.lexer.PeekToken(1)
-
-	for {
-		if IsColumnDefinitionsTerminal(token) {
-			break
-		}
-
-		columnDef, err := p.ColumnDefinition()
-		if err != nil {
-			return nil, err
-		}
-		node.Definitions = append(node.Definitions, columnDef)
-
-		token = p.lexer.PeekToken(1)
-		if token.Kind == TokenKind_Comma {
-			comma := p.ConsumeToken()
-			token = p.lexer.PeekToken(1)
-			if token.Kind == TokenKind_RParen {
-				return nil, p.NewParseError(errors.New("unexpected trailing comma"), comma)
-			}
-		}
-	}
-
-	return node, nil
-}
-
-func (p *Parser) TableConstraints(columnDefinitions *AstNode_ColumnDefinitions) (*AstNode_TableConstraints, error) {
-
-	var constraints AstNodeList = AstNodeList{}
-	token := p.lexer.PeekToken(1)
-
-	for {
-		if token.Kind == TokenKind_RParen {
-			break
-		}
-
-		tableConstraint, err := p.TableConstraint(columnDefinitions)
-		if err != nil {
-			return nil, err
-		}
-		constraints = append(constraints, tableConstraint)
-
-		token = p.lexer.PeekToken(1)
-		if token.Kind == TokenKind_Comma {
-			comma := p.ConsumeToken()
-			token = p.lexer.PeekToken(1)
-			if token.Kind == TokenKind_RParen {
-				return nil, p.NewParseError(errors.New("unexpected trailing comma"), comma)
-			}
-		}
-	}
-
-	if len(constraints) > 0 {
-		return &AstNode_TableConstraints{
-			Constraints: constraints,
-		}, nil
-	}
-	return nil, nil
-}
-
-func (p *Parser) PeekedIsColumnDefTerminal() bool {
-	next := p.lexer.PeekToken(1)
-	switch next.Kind {
-	case TokenKind_Comma:
-		return true
-	case TokenKind_RParen:
-		return true
-	default:
-		return false
-	}
-}
-
-func (p *Parser) ColumnDefinition() (AstNode, error) {
-
-	columnIdentifier, err := p.Identifier()
-	if err != nil {
-		return nil, err
-	}
-	columnType, err := p.TypeName()
-	if err != nil {
-		return nil, err
-	}
-	columnConstraints, err := p.ColumnConstraints()
-	if err != nil {
-		return nil, err
-	}
-
-	return &AstNode_ColumnDefinition{
-		ColumnName:        columnIdentifier,
-		TypeName:          columnType,
+	return &ColumnDefinition{
+		ColumnName:        columnName,
+		TypeName:          typeName,
 		ColumnConstraints: columnConstraints,
-	}, nil
+	}
 }
 
-func (p *Parser) TableConstraint(columnDefs *AstNode_ColumnDefinitions) (AstNode, error) {
+func (p *Parser) ColumnConstraints() []AstNode {
 
-	var name *AstNode_Identifier = nil
+	result := []AstNode{}
 
-	_, err := p.Keyword(TokenKind_Keyword_CONSTRAINT)
-	if err == nil {
-		ident, err := p.Identifier()
-		if err != nil {
-			return nil, err
+ColumnConstraintsLoop:
+	for !p.tokenizer.Eof() {
+		switch token := p.CurrentToken; token.Kind {
+		case ',', ')':
+			break ColumnConstraintsLoop
+		default:
+			columnConstraint := p.ColumnConstraint()
+			result = append(result, columnConstraint)
 		}
-		name = ident
 	}
 
-	token := p.lexer.PeekToken(1)
+	return result
+}
 
-	switch token.Kind {
+func (p *Parser) ColumnConstraint() AstNode {
+
+	constraintName := p.MaybeConstraintName()
+
+	switch token := p.CurrentToken; token.Kind {
 	case TokenKind_Keyword_PRIMARY:
-		primarykey, err := p.TableConstraint_PrimaryKey(columnDefs)
-		if err != nil {
-			return nil, err
-		}
-		return &AstNode_TableConstraint{
-			Name:       name,
-			Constraint: primarykey,
-		}, nil
+		return p.ColumnConstraint_PrimaryKey(constraintName)
+	case TokenKind_Keyword_NOT:
+		return p.ColumnConstraint_NotNull(constraintName)
+	case TokenKind_Keyword_DEFAULT:
+		return p.ColumnConstraint_Default(constraintName)
 	case TokenKind_Keyword_UNIQUE:
-		return nil, p.NewParseError(errors.New("not implemented"), token)
+		return p.ColumnConstraint_Unique(constraintName)
+	case TokenKind_Keyword_COLLATE:
+		return p.ColumnConstraint_Collate(constraintName)
 	case TokenKind_Keyword_CHECK:
-		return nil, p.NewParseError(errors.New("not implemented"), token)
-	case TokenKind_Keyword_FOREIGN:
-		return nil, p.NewParseError(errors.New("not implemented"), token)
+		return p.Constraint_Check(constraintName)
+	case TokenKind_Keyword_AS:
+		return p.ColumnConstraint_Generated(constraintName)
+	case TokenKind_Keyword_GENERATED:
+		return p.ColumnConstraint_Generated(constraintName)
 	default:
-		return nil, p.NewParseError(errors.New("expected table constraint"), token)
+		{
+			return NewError(
+				errors.New("expected column constraint"),
+				token,
+				p.tokenizer.TokenizerData,
+				p.tokenizer.SourceCode,
+			)
+		}
 	}
 }
 
-func (p *Parser) TableConstraint_PrimaryKey(columnDefs *AstNode_ColumnDefinitions) (AstNode, error) {
+func (p *Parser) ColumnConstraint_PrimaryKey(constraintName AstNode) ColumnConstraint {
 
-	primary, err := p.Keyword(TokenKind_Keyword_PRIMARY)
-	if err != nil {
-		return nil, err
+	if _, err := p.Expect(TokenKind_Keyword_PRIMARY); err != nil {
+		return err
 	}
 
-	key, err := p.Keyword(TokenKind_Keyword_KEY)
-	if err != nil {
-		return nil, err
+	if _, err := p.Expect(TokenKind_Keyword_KEY); err != nil {
+		return err
 	}
 
-	if lparen, ok, _ /*comments*/ := p.AcceptToken(TokenKind_LParen); !ok {
-		return nil, p.NewParseError(errors.New("expected '(' after primary key table constraint"), lparen)
+	orderBy := p.MaybeOrderBy()
+	conflictclause := p.MaybeConflictClause()
+
+	autoincrement := false
+	if p.CurrentToken.Kind == TokenKind_Keyword_AUTOINCREMENT {
+		p.Advance()
 	}
 
-	tableConstraint := &AstNode_TableConstraint_PrimaryKey{
-		PrimaryKeyword: primary,
-		KeyKeyword:     key,
+	return &ColumnConstraint_PrimaryKey{
+		Name:           constraintName,
+		ConflictClause: conflictclause,
+		Order:          orderBy,
+		AutoIncrement:  autoincrement,
 	}
-
-	parsingIndexCols := true
-	for parsingIndexCols {
-		indexedcol, err := p.IndexedColumn(columnDefs)
-		if err != nil {
-			return nil, err
-		}
-		tableConstraint.IndexedColumns = append(tableConstraint.IndexedColumns, indexedcol)
-
-		if _, ok, _ /*comments*/ := p.AcceptToken(TokenKind_Comma); ok {
-			continue
-		}
-
-		next := p.lexer.PeekToken(1)
-		if next.Kind == TokenKind_RParen {
-			parsingIndexCols = false
-		}
-	}
-
-	if rparen, ok, _ /*comments*/ := p.AcceptToken(TokenKind_RParen); !ok {
-		return nil, p.NewParseError(errors.New("expected ')' at end of indexed columns of primary key constraint on table"), rparen)
-	}
-
-	conflictclause, _ := p.ConflictClause()
-	tableConstraint.ConflictClause = conflictclause
-
-	return tableConstraint, nil
 }
 
-func (p *Parser) IndexedColumn(tabledef *AstNode_ColumnDefinitions) (AstNode, error) {
-	token := p.lexer.PeekToken(1)
+func (p *Parser) ColumnConstraint_NotNull(constraintName AstNode) ColumnConstraint {
 
+	if _, err := p.Expect(TokenKind_Keyword_NOT); err != nil {
+		return err
+	}
+
+	if _, err := p.Expect(TokenKind_Keyword_NULL); err != nil {
+		return err
+	}
+
+	return &ColumnConstraint_NotNull{}
+}
+
+func (p *Parser) ColumnConstraint_Default(constraintName AstNode) ColumnConstraint {
+
+	if _, err := p.Expect(TokenKind_Keyword_DEFAULT); err != nil {
+		return err
+	}
+
+	switch token := p.CurrentToken; token.Kind {
+	case TokenKind_StringLiteral:
+		p.Advance()
+		return &ColumnConstraint_Default{
+			Default: &LiteralString{
+				Token: token,
+				Value: token.Text,
+			},
+		}
+	case TokenKind_DecimalNumericLiteral, TokenKind_BinaryNumericLiteral, TokenKind_HexNumericLiteral, TokenKind_OctalNumericLiteral:
+		p.Advance()
+		return &ColumnConstraint_Default{
+			Default: &LiteralNumber{
+				Token: token,
+				Value: p.TokenToNumber(token),
+			},
+		}
+	case TokenKind_Keyword_TRUE, TokenKind_Keyword_FALSE:
+		p.Advance()
+		return &ColumnConstraint_Default{
+			Default: &LiteralBoolean{
+				Token: token,
+				Value: p.TokenToBoolean(token),
+			},
+		}
+	case TokenKind_Identifier:
+		p.Advance()
+		return &ColumnConstraint_Default{
+			Default: &token,
+		}
+	default:
+		panic("not implemented")
+	}
+}
+
+func (p *Parser) TokenToBoolean(token Token) Boolean {
 	switch token.Kind {
+	case TokenKind_Keyword_TRUE:
+		return Boolean(true)
+	case TokenKind_Keyword_FALSE:
+		return Boolean(false)
+	case TokenKind_Keyword_ON:
+		return Boolean(true)
+	default:
+		panic("unreachable")
+	}
+}
+
+func (p *Parser) TokenToNumber(token Token) AstNode {
+	switch token.Kind {
+	case TokenKind_HexNumericLiteral:
+		value, err := strconv.ParseUint(token.Text, 16, 64)
+		if err != nil {
+			return NewError(
+				err,
+				token,
+				p.tokenizer.TokenizerData,
+				p.tokenizer.SourceCode,
+			)
+		}
+		return Integer(value)
+	case TokenKind_OctalNumericLiteral:
+		value, err := strconv.ParseUint(token.Text, 8, 64)
+		if err != nil {
+			return NewError(
+				err,
+				token,
+				p.tokenizer.TokenizerData,
+				p.tokenizer.SourceCode,
+			)
+		}
+		return Integer(value)
+	case TokenKind_BinaryNumericLiteral:
+		value, err := strconv.ParseUint(token.Text, 2, 64)
+		if err != nil {
+			return NewError(
+				err,
+				token,
+				p.tokenizer.TokenizerData,
+				p.tokenizer.SourceCode,
+			)
+		}
+		return Integer(value)
+	case TokenKind_DecimalNumericLiteral:
+		value, err := strconv.ParseFloat(token.Text, 10)
+		if err != nil {
+			return NewError(
+				err,
+				token,
+				p.tokenizer.TokenizerData,
+				p.tokenizer.SourceCode,
+			)
+		}
+		return Float(value)
+	default:
+		return NewError(
+			fmt.Errorf("invalid token kind to parse into number"),
+			token,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
+	}
+}
+
+func (p *Parser) ColumnConstraint_Unique(constraintName AstNode) ColumnConstraint {
+
+	if _, err := p.Expect(TokenKind_Keyword_UNIQUE); err != nil {
+		return err
+	}
+
+	return &ColumnConstraint_Unique{
+		Name: constraintName,
+	}
+}
+
+func (p *Parser) ColumnConstraint_Collate(constraintName AstNode) ColumnConstraint {
+
+	if _, err := p.Expect(TokenKind_Keyword_COLLATE); err != nil {
+		return err
+	}
+
+	collationName := p.Identifier()
+	if err, isErr := collationName.(*Error); isErr {
+		return err
+	}
+	return &ColumnConstraint_Collate{
+		Name:    constraintName,
+		Collate: collationName,
+	}
+}
+
+func (p *Parser) ColumnConstraint_Generated(constraintName AstNode) ColumnConstraint {
+
+	if p.CurrentToken.Kind == TokenKind_Keyword_GENERATED {
+		p.Advance()
+
+		if _, err := p.Expect(TokenKind_Keyword_ALWAYS); err != nil {
+			return err
+		}
+	}
+
+	if _, err := p.Expect(TokenKind_Keyword_AS); err != nil {
+		return err
+	}
+
+	if _, err := p.Expect('('); err != nil {
+		return err
+	}
+
+	expr := p.Expr(0)
+
+	if _, err := p.Expect(')'); err != nil {
+		return err
+	}
+
+	storage := p.GeneratedColumnStorage()
+
+	return &ColumnConstraint_Generated{
+		Name:    constraintName,
+		As:      expr,
+		Storage: storage,
+	}
+}
+
+func (p *Parser) GeneratedColumnStorage() AstNode {
+	switch token := p.CurrentToken; token.Kind {
+	case TokenKind_Keyword_VIRTUAL:
+		p.Advance()
+		return &GeneratedColumnStorage{
+			Token: token,
+			Value: GeneratedColumnStorageValue_Virtual,
+		}
+	case TokenKind_Keyword_STORED:
+		p.Advance()
+		return &GeneratedColumnStorage{
+			Token: token,
+			Value: GeneratedColumnStorageValue_Stored,
+		}
+	default:
+		return nil
+	}
+}
+
+func (p *Parser) MaybeConstraintName() AstNode {
+	// we may or may not have a constraint keyword here so peek and check
+	if p.CurrentToken.Kind != TokenKind_Keyword_CONSTRAINT {
+		return nil
+	}
+	p.Advance()
+
+	named := p.Identifier()
+	if err, isErr := named.(*Error); isErr {
+		return NewError(
+			fmt.Errorf("%w: for table constraint name", err),
+			err.OffendingToken,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
+	}
+
+	return named
+}
+
+func (p *Parser) TableConstraints() []AstNode {
+
+	var constraints []AstNode = make([]AstNode, 0)
+
+TableConstraintsLoop:
+	for !p.tokenizer.Eof() {
+
+		switch p.CurrentToken.Kind {
+		case ')':
+			break TableConstraintsLoop
+		case ',':
+			p.Advance()
+			continue
+		default:
+			tableConstraint := p.TableConstraint()
+			constraints = append(constraints, tableConstraint)
+		}
+	}
+
+	return constraints
+}
+
+func (p *Parser) TableConstraint() AstNode {
+
+	constraintName := p.MaybeConstraintName()
+
+	switch token := p.CurrentToken; token.Kind {
+	case TokenKind_Keyword_PRIMARY:
+		return p.TableConstraint_PrimaryKey(constraintName)
+	case TokenKind_Keyword_FOREIGN:
+		return p.TableConstraint_ForeignKey(constraintName)
+	default:
+		return NewError(
+			errors.New("expected table constraint"),
+			token,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
+	}
+}
+
+func (p *Parser) TableConstraint_PrimaryKey(constraintName AstNode) TableConstraint {
+
+	if _, err := p.Expect(TokenKind_Keyword_PRIMARY); err != nil {
+		return err
+	}
+
+	if _, err := p.Expect(TokenKind_Keyword_KEY); err != nil {
+		return err
+	}
+
+	if _, err := p.Expect('('); err != nil {
+		return err
+	}
+
+	var indexedCols []AstNode = make([]AstNode, 0)
+
+IndexedColumnsLoop:
+	for !p.tokenizer.Eof() {
+
+		switch p.CurrentToken.Kind {
+		case ',':
+			p.Advance()
+			continue
+		case ')':
+			break IndexedColumnsLoop
+		default:
+			indexedCol := p.IndexedColumn(false)
+			indexedCols = append(indexedCols, indexedCol)
+		}
+	}
+
+	if _, err := p.Expect(')'); err != nil {
+		return err
+	}
+
+	conflictclause := p.MaybeConflictClause()
+
+	tableConstraint := &TableConstraint_PrimaryKey{
+		Name:           constraintName,
+		IndexedColumns: indexedCols,
+		ConflictClause: conflictclause,
+	}
+
+	return tableConstraint
+}
+
+func (p *Parser) TableConstraint_ForeignKey(constraintName AstNode) TableConstraint {
+
+	if _, err := p.Expect(TokenKind_Keyword_FOREIGN); err != nil {
+		return err
+	}
+
+	if _, err := p.Expect(TokenKind_Keyword_KEY); err != nil {
+		return err
+	}
+
+	if _, err := p.Expect('('); err != nil {
+		return err
+	}
+
+	columnNames := []AstNode{}
+
+ColumnNamesLoop:
+	for !p.tokenizer.Eof() {
+		switch p.CurrentToken.Kind {
+		case ',':
+			p.Advance()
+			continue
+		case ')':
+			break ColumnNamesLoop
+		default:
+			columnName := p.Identifier()
+			columnNames = append(columnNames, columnName)
+		}
+	}
+
+	if _, err := p.Expect(')'); err != nil {
+		return err
+	}
+
+	fkClause := p.ForeignKeyClause()
+
+	return &TableConstraint_ForeignKey{
+		Name:     constraintName,
+		Columns:  columnNames,
+		FkClause: fkClause,
+	}
+}
+
+func (p *Parser) ForeignKeyClause() AstNode {
+	if _, err := p.Expect(TokenKind_Keyword_REFERENCES); err != nil {
+		return err
+	}
+
+	foreignTable := p.Identifier()
+	if err, isErr := foreignTable.(*Error); isErr {
+		return err
+	}
+
+	foreignColumns := []AstNode{}
+
+	if p.CurrentToken.Kind == '(' {
+		p.Advance()
+	ForeignColumnsLoop:
+		for !p.tokenizer.Eof() {
+			switch p.CurrentToken.Kind {
+			case ',':
+				p.Advance()
+				continue
+			case ')':
+				break ForeignColumnsLoop
+			default:
+				columnName := p.Identifier()
+				foreignColumns = append(foreignColumns, columnName)
+			}
+		}
+
+		if _, err := p.Expect(')'); err != nil {
+			return err
+		}
+	}
+
+	actions := []ForeignKeyActionTrigger{}
+	var matchName AstNode = nil
+	var deferrable AstNode = nil
+
+ForeignKeyModifiersLoop:
+	for !p.tokenizer.Eof() {
+		switch p.CurrentToken.Kind {
+		case TokenKind_Keyword_ON:
+			action := p.ForeignKeyActionTrigger()
+			actions = append(actions, action)
+			continue
+		case TokenKind_Keyword_MATCH:
+			matchName = p.Identifier()
+			continue
+		case TokenKind_Keyword_NOT:
+			deferrable = p.ForeignKeyDeferrable()
+			continue
+		case TokenKind_Keyword_DEFERRABLE:
+			deferrable = p.ForeignKeyDeferrable()
+			continue
+		default:
+			break ForeignKeyModifiersLoop
+		}
+	}
+
+	return &ForeignKeyClause{
+		ForeignTable:   foreignTable,
+		ForeignColumns: foreignColumns,
+		Actions:        actions,
+		MatchName:      matchName,
+		Deferrable:     deferrable,
+	}
+}
+
+func (p *Parser) ForeignKeyActionTrigger() ForeignKeyActionTrigger {
+
+	if _, err := p.Expect(TokenKind_Keyword_ON); err != nil {
+		return err
+	}
+
+	switch token := p.CurrentToken; token.Kind {
+	case TokenKind_Keyword_DELETE:
+		p.Advance()
+		return &OnDelete{
+			Action: p.ForeignKeyAction(),
+		}
+	case TokenKind_Keyword_UPDATE:
+		p.Advance()
+		return &OnUpdate{
+			Action: p.ForeignKeyAction(),
+		}
+	default:
+		return NewError(
+			fmt.Errorf("expected action trigger keyword 'delete' or 'update' for fk action"),
+			token,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
+	}
+}
+
+func (p *Parser) ForeignKeyAction() ForeignKeyAction {
+	switch token := p.CurrentToken; token.Kind {
+	case TokenKind_Keyword_CASCADE:
+		p.Advance()
+		return &Cascade{}
+	case TokenKind_Keyword_RESTRICT:
+		p.Advance()
+		return &Restrict{}
+	case TokenKind_Keyword_NO:
+		p.Advance()
+		if _, err := p.Expect(TokenKind_Keyword_ACTION); err != nil {
+			return err
+		}
+		return &NoAction{}
+	case TokenKind_Keyword_SET:
+		p.Advance()
+		switch token := p.CurrentToken; token.Kind {
+		case TokenKind_Keyword_DEFAULT:
+			p.Advance()
+			return &SetDefault{}
+		case TokenKind_Keyword_NULL:
+			p.Advance()
+			return &SetNull{}
+		default:
+			return NewError(
+				fmt.Errorf("expected keyword 'default' or 'null' for fk action 'set'"),
+				token,
+				p.tokenizer.TokenizerData,
+				p.tokenizer.SourceCode,
+			)
+		}
+	default:
+		return NewError(
+			fmt.Errorf("expected fk action method 'cascade', 'restrict', 'no action', 'set default' or 'set null'"),
+			token,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
+	}
+}
+
+func (p *Parser) ForeignKeyDeferrable() AstNode {
+
+	not := p.CurrentToken.Kind == TokenKind_Keyword_NOT
+	if not {
+		p.Advance()
+	}
+
+	if _, err := p.Expect(TokenKind_Keyword_DEFERRABLE); err != nil {
+		return err
+	}
+
+	if p.CurrentToken.Kind == TokenKind_Keyword_INITIALLY {
+		p.Advance()
+		switch token := p.CurrentToken; token.Kind {
+		case TokenKind_Keyword_IMMEDIATE:
+			p.Advance()
+			return ForeignKeyDeferrable_Immediate
+		case TokenKind_Keyword_DEFERRED:
+			p.Advance()
+			if not {
+				return ForeignKeyDeferrable_Immediate
+			} else {
+				return ForeignKeyDeferrable_Deferred
+			}
+		}
+	}
+
+	return ForeignKeyDeferrable_Immediate
+}
+
+func (p *Parser) TableOptions() AstNode {
+
+	strict := false
+	withoutRowId := false
+
+TableOptionsLoop:
+	for !p.tokenizer.Eof() {
+		switch token := p.CurrentToken; token.Kind {
+		case TokenKind_Keyword_STRICT:
+			p.Advance()
+			strict = true
+			continue
+		case TokenKind_Keyword_WITHOUT:
+			p.Advance()
+			if _, err := p.Expect(TokenKind_Keyword_ROWID); err != nil {
+				return err
+			}
+		default:
+			break TableOptionsLoop
+		}
+	}
+
+	return &TableOptions{
+		Strict:       strict,
+		WithoutRowId: withoutRowId,
+	}
+}
+
+func (p *Parser) MaybeConflictClause() AstNode {
+
+	if p.CurrentToken.Kind != TokenKind_Keyword_ON {
+		return nil
+	}
+	p.Advance()
+
+	if _, err := p.Expect(TokenKind_Keyword_CONFLICT); err != nil {
+		return err
+	}
+
+	switch token := p.CurrentToken; token.Kind {
+	case TokenKind_Keyword_ROLLBACK:
+		fallthrough
+	case TokenKind_Keyword_ABORT:
+		fallthrough
+	case TokenKind_Keyword_FAIL:
+		fallthrough
+	case TokenKind_Keyword_IGNORE:
+		fallthrough
+	case TokenKind_Keyword_REPLACE:
+		p.Advance()
+		return &token
+	default:
+		return NewError(
+			errors.New("expected conflict clause verb"),
+			token,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
+	}
+}
+
+func (p *Parser) TypeName() AstNode {
+
+	ident := p.Identifier()
+	if err, isErr := ident.(*Error); isErr {
+		return NewError(
+			fmt.Errorf("%w: for type name", err),
+			err.OffendingToken,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
+	}
+
+	return &TypeName{
+		TypeName: ident,
+	}
+}
+
+func (p *Parser) Constraint_Check(constraintName AstNode) Constraint {
+
+	if _, err := p.Expect(TokenKind_Keyword_CHECK); err != nil {
+		return err
+	}
+
+	if _, err := p.Expect('('); err != nil {
+		return err
+	}
+
+	expr := p.Expr(0)
+	if err, isErr := expr.(*Error); isErr {
+		return &Constraint_Check{
+			Name:  constraintName,
+			Check: err,
+		}
+	}
+
+	if _, err := p.Expect(')'); err != nil {
+		return NewError(
+			fmt.Errorf("%w: in check constraint", err),
+			p.CurrentToken,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
+	}
+
+	return &Constraint_Check{
+		Name:  constraintName,
+		Check: expr,
+	}
+}
+
+func (p *Parser) MaybeOrderBy() OrderBy {
+
+	switch token := p.CurrentToken; token.Kind {
+	case TokenKind_Keyword_ASC:
+		fallthrough
+	case TokenKind_Keyword_DESC:
+		p.Advance()
+		return (OrderBy)(&token)
+	default:
+		return (OrderBy)(nil)
+	}
+}
+
+func (p *Parser) Identifier() Identifier {
+	if token := p.CurrentToken; token.Kind == TokenKind_Identifier {
+		p.Advance()
+		return &token
+	}
+
+	return NewError(
+		errors.New("expected identifier"),
+		p.CurrentToken,
+		p.tokenizer.TokenizerData,
+		p.tokenizer.SourceCode,
+	)
+}
+
+func (p *Parser) MaybeBinaryOperator() BinaryOperator {
+	switch p.CurrentToken.Kind {
+	case '=':
+		return &EquivOp{}
+	case '+':
+		return &AddOp{}
+	case '-':
+		return &SubOp{}
+	case '*':
+		return &MulOp{}
+	case '/':
+		return &DivOp{}
+	case TokenKind_gte:
+		return &GteOp{}
+	case TokenKind_Keyword_IN:
+		return &InOp{}
+	default:
+		return nil
+	}
+}
+
+func (p *Parser) Expr(minBindingPower int) Expr {
+
+	lhs := p.Nud()
+
+	for !p.tokenizer.Eof() {
+		operator := p.MaybeBinaryOperator()
+		if operator == nil {
+			return lhs
+		}
+		if operator.bindingPower().L < minBindingPower {
+			break
+		}
+
+		// consume the operator found in MaybeBinaryOperator
+		p.Advance()
+
+		rhs := p.Expr(operator.bindingPower().R)
+		operator.SetLhs(lhs)
+		operator.SetRhs(rhs)
+		lhs = operator
+	}
+
+	return lhs
+}
+
+func (p *Parser) Identifier_Nud() Expr {
+	ident := p.CurrentToken
+	p.Advance()
+
+	switch p.CurrentToken.Kind {
+	case '(':
+		p.Advance()
+		arguments := p.ExprList()
+		if _, err := p.Expect(')'); err != nil {
+			return err
+		}
+		return &FunctionCall{
+			Name: ident,
+			Args: arguments,
+		}
+	case '.':
+		p.Advance()
+		schemaOrTable := ident
+		tableOrColumn := p.Identifier()
+		if err, isErr := tableOrColumn.(*Error); isErr {
+			return err
+		}
+		if p.CurrentToken.Kind == '.' {
+			p.Advance()
+			return &ColumnName{
+				Schema: (Identifier)(nil),
+				Table:  &schemaOrTable,
+				Column: tableOrColumn,
+			}
+		}
+
+		column := p.Identifier()
+		if err, isErr := column.(*Error); isErr {
+			return err
+		}
+
+		return &ColumnName{
+			Schema: &schemaOrTable,
+			Table:  tableOrColumn,
+			Column: column,
+		}
+	default:
+		return &ident
+	}
+}
+
+func (p *Parser) Nud() Expr {
+	switch token := p.CurrentToken; token.Kind {
 	case TokenKind_Identifier:
 		{
-			ident, _, _ /*comments*/ := p.AcceptToken(TokenKind_Identifier)
-			if columndef := tabledef.ColumnNamed(ident.Text); columndef != nil {
-				return columndef.ColumnName, nil
-			}
-			return nil, p.NewParseError(fmt.Errorf("could not find column named %s for use in indexed column", token), token)
+			return p.Identifier_Nud()
 		}
+	case TokenKind_DecimalNumericLiteral, TokenKind_BinaryNumericLiteral, TokenKind_OctalNumericLiteral, TokenKind_HexNumericLiteral:
+		p.Advance()
+		return &LiteralNumber{
+			Token: token,
+			Value: p.TokenToNumber(token),
+		}
+	case TokenKind_StringLiteral:
+		p.Advance()
+		return &LiteralString{
+			Token: token,
+			Value: token.Text,
+		}
+	case TokenKind_Keyword_TRUE, TokenKind_Keyword_FALSE:
+		p.Advance()
+		return &LiteralBoolean{
+			Token: token,
+			Value: p.TokenToBoolean(token),
+		}
+	case TokenKind_Keyword_CASE:
+		return p.CaseExpr()
+	case '(':
+		p.Advance()
+		result := p.Expr(0)
+
+		if p.CurrentToken.Kind == ',' {
+			p.Advance()
+			list := ExprList{result}
+
+			rest := p.ExprList()
+			result = append(list, rest...)
+		}
+		if _, err := p.Expect(')'); err != nil {
+			return err
+		}
+		return result
 	default:
-		{
-			return nil, p.NewParseError(errors.New("expected column name in indexed column"), token)
-		}
+		return NewError(
+			fmt.Errorf("expected leaf for left handside of expression"),
+			token,
+			p.tokenizer.TokenizerData,
+			p.tokenizer.SourceCode,
+		)
 	}
 }
 
-func (p *Parser) ConflictClause() (*AstNode_ConflictClause, error) {
+func (p *Parser) CaseExpr() Expr {
 
-	_, err := p.Keyword(TokenKind_Keyword_ON)
-	if err != nil {
-		return nil, err
+	if _, err := p.Expect(TokenKind_Keyword_CASE); err != nil {
+		return err
 	}
 
-	_, err = p.Keyword(TokenKind_Keyword_CONFLICT)
-	if err != nil {
-		return nil, err
+	var operand Expr = nil
+	if p.CurrentToken.Kind != TokenKind_Keyword_WHEN {
+		operand = p.Expr(0)
 	}
 
-	conflictcommand := p.lexer.PeekToken(1)
-	switch conflictcommand.Kind {
-	case TokenKind_Keyword_ROLLBACK:
-		rollback, err := p.Keyword(TokenKind_Keyword_ROLLBACK)
-		if err != nil {
-			return nil, err
+	cases := []WhenThen{}
+
+CasesLoop:
+	for !p.tokenizer.Eof() {
+		if _, err := p.Expect(TokenKind_Keyword_WHEN); err != nil {
+			return err
 		}
-		return &AstNode_ConflictClause{
-			OnConflict: rollback,
-		}, nil
-	case TokenKind_Keyword_ABORT:
-		abort, err := p.Keyword(TokenKind_Keyword_ABORT)
-		if err != nil {
-			return nil, err
+		when := p.Expr(0)
+
+		if _, err := p.Expect(TokenKind_Keyword_THEN); err != nil {
+			return err
 		}
-		return &AstNode_ConflictClause{
-			OnConflict: abort,
-		}, nil
-	case TokenKind_Keyword_FAIL:
-		fail, err := p.Keyword(TokenKind_Keyword_FAIL)
-		if err != nil {
-			return nil, err
+		then := p.Expr(0)
+
+		cases = append(cases, WhenThen{
+			When: when,
+			Then: then,
+		})
+
+		switch p.CurrentToken.Kind {
+		case TokenKind_Keyword_ELSE, TokenKind_Keyword_END:
+			break CasesLoop
 		}
-		return &AstNode_ConflictClause{
-			OnConflict: fail,
-		}, nil
-	case TokenKind_Keyword_IGNORE:
-		ignore, err := p.Keyword(TokenKind_Keyword_IGNORE)
-		if err != nil {
-			return nil, err
-		}
-		return &AstNode_ConflictClause{
-			OnConflict: ignore,
-		}, nil
-	case TokenKind_Keyword_REPLACE:
-		replace, err := p.Keyword(TokenKind_Keyword_REPLACE)
-		if err != nil {
-			return nil, err
-		}
-		return &AstNode_ConflictClause{
-			OnConflict: replace,
-		}, nil
-	default:
-		return nil, p.NewParseError(errors.New("expected conflict clause verb"), conflictcommand)
+	}
+
+	var elseExpr Expr = nil
+	if p.CurrentToken.Kind == TokenKind_Keyword_ELSE {
+		p.Advance()
+		elseExpr = p.Expr(0)
+	}
+
+	if _, err := p.Expect(TokenKind_Keyword_END); err != nil {
+		return err
+	}
+
+	return &CaseExpression{
+		Operand: operand,
+		Cases:   cases,
+		Else:    elseExpr,
 	}
 }
 
-func (p *Parser) TypeName() (*AstNode_TypeName, error) {
-	ident, ok, comments := p.AcceptToken(TokenKind_Identifier)
-	if !ok {
-		return nil, p.NewParseError(errors.New("expected type name"), ident)
-	}
+func (p *Parser) ExprList() ExprList {
+	result := ExprList{}
 
-	return &AstNode_TypeName{
-		TypeName: ident,
-		Comments: p.MakeComments(comments),
-	}, nil
-}
-
-func (p *Parser) ColumnConstraints() (*AstNode_ColumnConstraints, error) {
-
-	result := &AstNode_ColumnConstraints{
-		Constraints: []AstNode{},
-	}
-
-	for !p.PeekedIsColumnDefTerminal() {
-		columnConstraint, err := p.ColumnConstraint()
-		if err != nil {
-			return nil, err
-		}
-		result.Constraints = append(result.Constraints, columnConstraint)
-	}
-
-	return result, nil
-}
-
-func (p *Parser) ColumnConstraint() (*AstNode_ColumnConstraint, error) {
-
-	var err error
-	var name *AstNode_Identifier = nil
-
-	constraint, _ := p.Keyword(TokenKind_Keyword_CONSTRAINT)
-	if constraint != nil {
-		name, err = p.Identifier()
-		if err != nil {
-			return nil, err
+ExprListLoop:
+	for !p.tokenizer.Eof() {
+		switch p.CurrentToken.Kind {
+		case ',':
+			p.Advance()
+			continue
+		case ')':
+			break ExprListLoop
+		default:
+			expr := p.Expr(0)
+			result = append(result, expr)
 		}
 	}
 
-	token := p.lexer.PeekToken(1)
-
-	switch token.Kind {
-	case TokenKind_Keyword_PRIMARY:
-
-		primary, err := p.Keyword(TokenKind_Keyword_PRIMARY)
-		if err != nil {
-			return nil, p.NewParseError(errors.New("expected 'primary' keyword"), primary.Keyword)
-		}
-
-		key, err := p.Keyword(TokenKind_Keyword_KEY)
-		if err != nil {
-			return nil, err.Join(errors.New("expected 'KEY' keyword after 'PRIMARY'"))
-		}
-
-		asc, _ := p.Keyword(TokenKind_Keyword_ASC)
-		desc, _ := p.Keyword(TokenKind_Keyword_DESC)
-
-		conflictclause, _ := p.ConflictClause()
-
-		primarykeyconstraint := &AstNode_ColumnConstraint_PrimaryKey{
-			PrimaryKeyword: primary,
-			KeyKeyword:     key,
-			ConflictClause: conflictclause,
-		}
-
-		if asc != nil {
-			primarykeyconstraint.OrderKeyword = asc
-		}
-		if desc != nil {
-			primarykeyconstraint.OrderKeyword = desc
-		}
-
-		return &AstNode_ColumnConstraint{
-			Name:       name,
-			Constraint: primarykeyconstraint,
-		}, nil
-	case TokenKind_Keyword_NOT:
-		not, err := p.Keyword(TokenKind_Keyword_NOT)
-		if err != nil {
-			return nil, err
-		}
-
-		null, err := p.Keyword(TokenKind_Keyword_NULL)
-		if err != nil {
-			return nil, err
-		}
-		return &AstNode_ColumnConstraint{
-			Constraint: &AstNode_Constraint_NotNull{
-				Not:  not,
-				Null: null,
-			},
-		}, nil
-	case TokenKind_Keyword_DEFAULT:
-		// def := p.Keyword(TokenKind_Keyword_DEFAULT)
-		fallthrough
-	default:
-		{
-			return nil, p.NewParseError(errors.New("expected identifier"), token)
-		}
-	}
-}
-
-func (p *Parser) Identifier() (*AstNode_Identifier, error) {
-	ident, ok, comments := p.AcceptToken(TokenKind_Identifier)
-	if !ok {
-		return nil, p.NewParseError(errors.New("expected identifier"), ident)
-	}
-
-	return &AstNode_Identifier{
-		Identifier: ident,
-		Comments:   p.MakeComments(comments),
-	}, nil
+	return result
 }
