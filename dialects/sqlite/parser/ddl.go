@@ -62,7 +62,7 @@ func (p *SqliteParser) CreateTableStatement(isTemporary bool) *ast.CreateTable {
 
 	tableDefinition := p.TableDefinition()
 
-	tableOptions := p.TableOptions()
+	tableOptions := p.MaybeTableOptions()
 
 	return ast.MakeCreateTable(
 		createKeyword,
@@ -93,4 +93,51 @@ func (p *SqliteParser) CreateVirtualTableStatement() ast.Statement {
 
 func (p *SqliteParser) CreateTemporaryStatement() ast.Statement {
 	panic("unimplemented")
+}
+
+func (p *SqliteParser) MaybeIfNotExists() *ast.IfNotExists {
+	if p.Current().Kind != tik.TokenKind_Keyword_IF {
+		return nil
+	}
+	ifKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_IF))
+	notKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_NOT))
+	existsKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_EXISTS))
+
+	return ast.MakeIfNotExists(ifKeyword, notKeyword, existsKeyword)
+}
+
+func (p *SqliteParser) MaybeTableOptions() *ast.TableOptions {
+
+	var withoutRowId *ast.WithoutRowId = nil
+	var strict *ast.Keyword = nil
+
+	for !p.EndOfFile() {
+		if p.Current().Kind == tik.TokenKind_Keyword_STRICT {
+			strict = ast.MakeKeyword(p.Current())
+			p.Advance()
+		} else if p.Current().Kind == tik.TokenKind_Keyword_WITHOUT {
+			withoutRowId = p.WithoutRowId()
+		}
+
+		if p.Current().Kind == ',' {
+			p.Advance()
+			continue
+		} else {
+			break
+		}
+	}
+
+	return ast.MakeTableOptions(
+		strict,
+		withoutRowId,
+	)
+}
+
+func (p *SqliteParser) WithoutRowId() *ast.WithoutRowId {
+	withoutKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_WITHOUT))
+	rowidKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_ROWID))
+	return ast.MakeWithoutRowId(
+		withoutKeyword,
+		rowidKeyword,
+	)
 }

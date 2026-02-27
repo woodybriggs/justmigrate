@@ -1458,7 +1458,7 @@ TableOptionsLoop:
 			continue
 		case tik.TokenKind_Keyword_WITHOUT:
 			withoutRowId = &ast.WithoutRowId{
-				Without: ast.MakeKeyword(token),
+				Without: ast.Keyword(token),
 			}
 			p.Advance()
 			p.Expect(tik.TokenKind_Keyword_ROWID)

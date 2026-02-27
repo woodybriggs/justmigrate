@@ -174,7 +174,7 @@ func (p *SqliteParser) IndexedColumn(allowExpressions bool) ast.IndexedColumn {
 
 	collation := p.MaybeCollation()
 
-	order := p.MaybeOrderBy()
+	order := p.MaybeOrderKeyword()
 
 	return ast.IndexedColumn{
 		Subject:   expr,
@@ -248,12 +248,13 @@ func (p *SqliteParser) ForeignKeyClause() *ast.ForeignKeyClause {
 	actions := []ast.ForeignKeyActionTrigger{}
 
 	for !p.EndOfFile() {
-		if p.Current().Kind == TokenKind_Keyword_ON {
+		if p.Current().Kind == tik.TokenKind_Keyword_ON {
 			action := p.ForeignKeyAction()
 			actions = append(actions, action)
 		} else if p.Current().Kind == tik.TokenKind_Keyword_MATCH {
-			matchName = p.Identifier()
-		} else if p.Current().Kind == TokenKind_Keyword_NOT {
+			ident := p.Identifier()
+			matchName = &ident
+		} else if p.Current().Kind == tik.TokenKind_Keyword_NOT {
 			deferrable = p.ForeignKeyDeferrable()
 		} else if p.Current().Kind == tik.TokenKind_Keyword_DEFERRABLE {
 			deferrable = p.ForeignKeyDeferrable()
@@ -269,30 +270,13 @@ func (p *SqliteParser) ForeignKeyClause() *ast.ForeignKeyClause {
 		columns,
 		rParen,
 		actions,
-		deferrable,
 		matchName,
+		deferrable,
 	)
 }
 
 func (p *SqliteParser) TableOptions() *ast.TableOptions {
 	panic("unimplemented")
-}
-
-func (p *SqliteParser) MaybeIfNotExists() *ast.IfNotExists {
-	if p.Current().Kind != tik.TokenKind_Keyword_IF {
-		return nil
-	}
-	ifKeyword := ast.Keyword(p.Current())
-	p.Advance()
-
-	notKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_NOT))
-	existsKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_EXISTS))
-
-	return ast.MakeIfNotExists(
-		ifKeyword,
-		notKeyword,
-		existsKeyword,
-	)
 }
 
 func (p *SqliteParser) ColumnDefinitions() []ast.ColumnDefinition {

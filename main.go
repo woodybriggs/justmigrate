@@ -5,6 +5,7 @@ import (
 	"os"
 	"woodybriggs/justmigrate/core/luther"
 	"woodybriggs/justmigrate/core/report"
+	"woodybriggs/justmigrate/dialects/sqlite/parser"
 	"woodybriggs/justmigrate/parser"
 )
 
@@ -22,12 +23,12 @@ func main() {
 		panic(err)
 	}
 
-	parser := parser.NewParser(tokenizer)
+	parser := sqlite.NewSqliteParser(tokenizer)
 	parser.Statements()
 
 	renderer := report.Renderer{}
 
-	for _, diag := range parser.Errors {
-		fmt.Println(renderer.Render(diag))
+	for _, report := range parser.Errors() {
+		renderer.Render(report)
 	}
 }

@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"woodybriggs/justmigrate/core/ast"
@@ -42,6 +43,10 @@ func NewParser(lexer *luther.Lexer) *Parser {
 	result.peekedToken = lexer.PeekToken()
 
 	return result
+}
+
+func (p *Parser) Errors() []report.Report {
+	return slices.Collect(maps.Values(p.errors))
 }
 
 func (p *Parser) Advance() {

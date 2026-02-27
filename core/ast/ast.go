@@ -617,6 +617,13 @@ type TableOptions struct {
 	WithoutRowId *WithoutRowId
 }
 
+func MakeTableOptions(strict *Keyword, withoutRowId *WithoutRowId) *TableOptions {
+	return &TableOptions{
+		Strict:       strict,
+		WithoutRowId: withoutRowId,
+	}
+}
+
 func (node *TableOptions) node() {}
 func (node *TableOptions) ToSql(f formatter.Formatter) {
 
@@ -631,8 +638,15 @@ func (node *TableOptions) IsWithoutRowId() bool {
 }
 
 type WithoutRowId struct {
-	Without AstNode
-	RowId   AstNode
+	Without Keyword
+	RowId   Keyword
+}
+
+func MakeWithoutRowId(without Keyword, rowId Keyword) *WithoutRowId {
+	return &WithoutRowId{
+		Without: without,
+		RowId:   rowId,
+	}
 }
 
 func (node *WithoutRowId) node() {}
@@ -843,7 +857,7 @@ func MakeTableConstraintForeignKey(
 	lParen tik.Token,
 	columns []Identifier,
 	rParen tik.Token,
-	fkClause ForeignKeyClause,
+	fkClause *ForeignKeyClause,
 ) *TableConstraint_ForeignKey {
 	return &TableConstraint_ForeignKey{
 		Name:           constraintName,
@@ -852,7 +866,7 @@ func MakeTableConstraintForeignKey(
 		LParen:         lParen,
 		Columns:        columns,
 		RParen:         rParen,
-		FkClause:       fkClause,
+		FkClause:       *fkClause,
 	}
 }
 
