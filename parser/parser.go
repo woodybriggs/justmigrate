@@ -1542,8 +1542,8 @@ func (p *Parser) TableConstraint_Check(constraintName *ast.ConstraintName) ast.T
 	p.Expect(')')
 
 	return &ast.TableConstraint_Check{
-		Name:  constraintName,
-		Check: expr,
+		Name: constraintName,
+		Expr: expr,
 	}
 }
 

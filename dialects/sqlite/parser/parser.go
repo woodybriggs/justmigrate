@@ -245,11 +245,11 @@ func (p *SqliteParser) ForeignKeyClause() *ast.ForeignKeyClause {
 
 	var deferrable *ast.ForeignKeyDeferrable = nil
 	var matchName *ast.Identifier = nil
-	actions := []ast.ForeignKeyActionTrigger{}
+	actions := []ast.ForeignKeyAction{}
 
 	for !p.EndOfFile() {
 		if p.Current().Kind == tik.TokenKind_Keyword_ON {
-			action := p.ForeignKeyAction()
+			action := p.ForeignKeyActionDo()
 			actions = append(actions, action)
 		} else if p.Current().Kind == tik.TokenKind_Keyword_MATCH {
 			ident := p.Identifier()
@@ -272,6 +272,64 @@ func (p *SqliteParser) ForeignKeyClause() *ast.ForeignKeyClause {
 		actions,
 		matchName,
 		deferrable,
+	)
+}
+
+func (p *SqliteParser) ForeignKeyAction() ast.ForeignKeyAction {
+	onKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_ON))
+
+	switch p.Current().Kind {
+	case tik.TokenKind_Keyword_UPDATE:
+		updateKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_UPDATE))
+		do := p.ForeignKeyActionDo()
+		return ast.MakeForeignKeyUpdateAction(
+			onKeyword,
+			updateKeyword,
+			do,
+		)
+	case tik.TokenKind_Keyword_DELETE:
+		deleteKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_DELETE))
+		do := p.ForeignKeyActionDo()
+		return ast.MakeForeignKeyDeleteAction(
+			onKeyword,
+			deleteKeyword,
+			do,
+		)
+	default:
+		p.ReportError(
+			report.NewReport("parse error").
+				WithLabels([]report.Label{
+					{
+						Source: p.Current().SourceCode,
+						Range:  p.Current().SourceRange,
+						Note:   "here",
+					},
+				}).
+				WithMessage("unexpected token when parsing foreign key action"),
+		)
+		return nil
+	}
+}
+
+func (p *SqliteParser) ForeignKeyActionDo() *ast.ForeignKeyActionTrigger {
+
+}
+
+func (p *SqliteParser) TableConstraint_Check(constraintName *ast.ConstraintName) ast.TableConstraint {
+	checkKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_CHECK))
+
+	lParen := p.Expect('(')
+
+	expr := p.Expr(0)
+
+	rParen := p.Expect(')')
+
+	return ast.MakeTableConstraintCheck(
+		constraintName,
+		checkKeyword,
+		lParen,
+		expr,
+		rParen,
 	)
 }
 
@@ -465,5 +523,32 @@ func (p *SqliteParser) MaybeOrderKeyword() *ast.Keyword {
 		return ast.MakeKeyword(p.Current())
 	default:
 		return nil
+	}
+}
+
+func (p *SqliteParser) Expr(minBindingPower int) ast.Expr {
+	return p.Parser.Expr(minBindingPower, p)
+}
+
+func (p *SqliteParser) Term() ast.Expr {
+	switch p.Current().Kind {
+	case tik.TokenKind_StringLiteral:
+		return &ast.LiteralString{
+			Token: p.Current(),
+			Value: p.Current().Text,
+		}
+	case tik.TokenKind_Identifier:
+		fallthrough
+	default:
+		panic("expression type not handled")
+	}
+}
+
+func (p *SqliteParser) OperatorBindingPower(token tik.Token) (bp ast.BindingPower, found bool) {
+	switch token.Kind {
+	case '+':
+		return ast.BindingPower{L: 100, R: 101}, true
+	default:
+		return ast.BindingPower{}, false
 	}
 }

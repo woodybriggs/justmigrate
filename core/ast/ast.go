@@ -1,8 +1,11 @@
 package ast
 
 import (
+	"errors"
 	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 	"woodybriggs/justmigrate/core/tik"
 	"woodybriggs/justmigrate/formatter"
 )
@@ -713,8 +716,27 @@ func (node *ConflictClause) Eq(other *ConflictClause) bool {
 }
 
 type TableConstraint_Check struct {
-	Name  *ConstraintName
-	Check Expr
+	Name         *ConstraintName
+	CheckKeyword Keyword
+	LParen       tik.Token
+	Expr         Expr
+	RParen       tik.Token
+}
+
+func MakeTableConstraintCheck(
+	constraintName *ConstraintName,
+	checkKeyword Keyword,
+	lParen tik.Token,
+	expr Expr,
+	rParen tik.Token,
+) *TableConstraint_Check {
+	return &TableConstraint_Check{
+		Name:         constraintName,
+		CheckKeyword: checkKeyword,
+		LParen:       lParen,
+		Expr:         expr,
+		RParen:       rParen,
+	}
 }
 
 func (node *TableConstraint_Check) node()                {}
@@ -729,7 +751,7 @@ func (node *TableConstraint_Check) Eq(other TableConstraint) bool {
 		}
 
 		// Otherwise we need to know if the Expression is "equivilent"
-		return node.Check.Eq(otherCheck.Check)
+		return node.Expr.Eq(otherCheck.Expr)
 	}
 
 	return true
@@ -936,7 +958,7 @@ type ForeignKeyClause struct {
 	LParen            tik.Token
 	ForeignColumns    []Identifier
 	RParen            tik.Token
-	Actions           []ForeignKeyActionTrigger
+	Actions           []ForeignKeyAction
 	MatchName         *Identifier
 	Deferrable        *ForeignKeyDeferrable
 }
@@ -947,7 +969,7 @@ func MakeForeignKeyClause(
 	lParen tik.Token,
 	foreignColumns []Identifier,
 	rParen tik.Token,
-	actions []ForeignKeyActionTrigger,
+	actions []ForeignKeyAction,
 	matchName *Identifier,
 	deferrable *ForeignKeyDeferrable,
 ) *ForeignKeyClause {
@@ -1003,85 +1025,106 @@ type ForeignKeyDeferrable struct {
 
 func (node *ForeignKeyDeferrable) node() {}
 
-type ForeignKeyActionTrigger interface {
-	AstNode
-	nodeForeignKeyActionTrigger()
-	Eq(other ForeignKeyActionTrigger) bool
-}
-
-type OnDelete struct {
-	Action ForeignKeyAction
-}
-
-func (node *OnDelete) node()                        {}
-func (node *OnDelete) nodeForeignKeyActionTrigger() {}
-func (node *OnDelete) Eq(other ForeignKeyActionTrigger) bool {
-	if other, ok := other.(*OnDelete); ok {
-		return node.Action.Eq(other.Action)
-	}
-	return false
-}
-
-type OnUpdate struct {
-	Action ForeignKeyAction
-}
-
-func (node *OnUpdate) node()                        {}
-func (node *OnUpdate) nodeForeignKeyActionTrigger() {}
-func (node *OnUpdate) Eq(other ForeignKeyActionTrigger) bool {
-	if other, ok := other.(*OnUpdate); ok {
-		return node.Action.Eq(other.Action)
-	}
-	return false
-}
-
 type ForeignKeyAction interface {
-	AstNode
 	nodeForeignKeyAction()
-	Eq(other ForeignKeyAction) bool
 }
 
-type NoAction struct{}
+type ForeignKeyDeleteAction struct {
+	OnKeyword     Keyword
+	DeleteKeyword Keyword
+	Action        ForeignKeyActionDo
+}
 
-func (node *NoAction) node()                 {}
-func (node *NoAction) nodeForeignKeyAction() {}
-func (node *NoAction) Eq(other ForeignKeyAction) bool {
+func MakeForeignKeyDeleteAction(
+	onKeyword Keyword,
+	deleteKeyword Keyword,
+	do ForeignKeyActionDo,
+) *ForeignKeyDeleteAction {
+	return &ForeignKeyDeleteAction{
+		OnKeyword:     onKeyword,
+		DeleteKeyword: deleteKeyword,
+		Action:        do,
+	}
+}
+
+type ForeignKeyUpdateAction struct {
+	OnKeyword     Keyword
+	UpdateKeyword Keyword
+	Action        ForeignKeyActionDo
+}
+
+func (node *ForeignKeyDeleteAction) nodeForeignKeyAction() {}
+
+func MakeForeignKeyUpdateAction(
+	onKeyword Keyword,
+	updateKeyword Keyword,
+	do ForeignKeyActionDo,
+) *ForeignKeyUpdateAction {
+	return &ForeignKeyUpdateAction{
+		OnKeyword:     onKeyword,
+		UpdateKeyword: updateKeyword,
+		Action:        do,
+	}
+}
+
+func (node *ForeignKeyUpdateAction) nodeForeignKeyAction() {}
+
+type ForeignKeyActionDo interface {
+	AstNode
+	nodeForeignKeyActionDo()
+	Eq(other ForeignKeyActionDo) bool
+}
+
+type NoAction struct {
+	NoKeyword     Keyword
+	ActionKeyword Keyword
+}
+
+func (node *NoAction) node()                   {}
+func (node *NoAction) nodeForeignKeyActionDo() {}
+func (node *NoAction) Eq(other ForeignKeyActionDo) bool {
 	_, ok := other.(*NoAction)
 	return ok
 }
 
 type Restrict Keyword
 
-func (node *Restrict) node()                 {}
-func (node *Restrict) nodeForeignKeyAction() {}
-func (node *Restrict) Eq(other ForeignKeyAction) bool {
+func (node *Restrict) node()                   {}
+func (node *Restrict) nodeForeignKeyActionDo() {}
+func (node *Restrict) Eq(other ForeignKeyActionDo) bool {
 	_, ok := other.(*Restrict)
 	return ok
 }
 
-type SetNull struct{}
+type SetNull struct {
+	SetKeyword  Keyword
+	NullKeyword Keyword
+}
 
-func (node *SetNull) node()                 {}
-func (node *SetNull) nodeForeignKeyAction() {}
-func (node *SetNull) Eq(other ForeignKeyAction) bool {
+func (node *SetNull) node()                   {}
+func (node *SetNull) nodeForeignKeyActionDo() {}
+func (node *SetNull) Eq(other ForeignKeyActionDo) bool {
 	_, ok := other.(*SetNull)
 	return ok
 }
 
-type SetDefault struct{}
+type SetDefault struct {
+	SetKeyword     Keyword
+	DefaultKeyword Keyword
+}
 
-func (node *SetDefault) node()                 {}
-func (node *SetDefault) nodeForeignKeyAction() {}
-func (node *SetDefault) Eq(other ForeignKeyAction) bool {
+func (node *SetDefault) node()                   {}
+func (node *SetDefault) nodeForeignKeyActionDo() {}
+func (node *SetDefault) Eq(other ForeignKeyActionDo) bool {
 	_, ok := other.(*SetDefault)
 	return ok
 }
 
 type Cascade Keyword
 
-func (node *Cascade) node()                 {}
-func (node *Cascade) nodeForeignKeyAction() {}
-func (node *Cascade) Eq(other ForeignKeyAction) bool {
+func (node *Cascade) node()                   {}
+func (node *Cascade) nodeForeignKeyActionDo() {}
+func (node *Cascade) Eq(other ForeignKeyActionDo) bool {
 	_, ok := other.(*Cascade)
 	return ok
 }
@@ -1349,13 +1392,66 @@ func (node *LiteralNull) Eq(other Expr) bool {
 	return false
 }
 
+var ErrTokenUnconvertableToBoolean = errors.New("token is not convertable to boolean")
+
+func TokenToLiteralBoolean(token tik.Token) (LiteralBoolean, error) {
+	switch token.Kind {
+	case tik.TokenKind_DecimalNumericLiteral:
+		fVal, err := strconv.ParseFloat(token.Text, 64)
+		if err != nil {
+
+			return LiteralBoolean{
+				Token: token,
+				Value: false,
+			}, fmt.Errorf("%w: %w :token is %s", ErrTokenUnconvertableToBoolean, err, token.Text)
+		}
+		if fVal > 0 {
+			return LiteralBoolean{
+				Token: token,
+				Value: true,
+			}, nil
+		} else {
+			return LiteralBoolean{
+				Token: token,
+				Value: false,
+			}, nil
+		}
+	case tik.TokenKind_Keyword_TRUE:
+		return LiteralBoolean{
+			Token: token,
+			Value: true,
+		}, nil
+	case tik.TokenKind_Keyword_FALSE:
+		return LiteralBoolean{
+			Token: token,
+			Value: false,
+		}, nil
+	case tik.TokenKind_Identifier:
+		if strings.ToLower(token.Text) == "true" {
+			return LiteralBoolean{
+				Token: token,
+				Value: true,
+			}, nil
+		} else if strings.ToLower(token.Text) == "false" {
+			return LiteralBoolean{
+				Token: token,
+				Value: false,
+			}, nil
+		} else {
+			return LiteralBoolean{}, fmt.Errorf("%w: unknown identifier: token is %s", ErrTokenUnconvertableToBoolean, token.Text)
+		}
+	default:
+		return LiteralBoolean{}, fmt.Errorf("%w: unexpected token: token is %s", ErrTokenUnconvertableToBoolean, token.Text)
+	}
+}
+
 type LiteralBoolean struct {
 	Token tik.Token
-	Value Boolean
+	Value bool
 }
 
 func (node *LiteralBoolean) ToSql(f formatter.Formatter) {
-	panic("not implemented")
+	f.Text(node.Token.Text)
 }
 
 func (node *LiteralBoolean) node()            {}
@@ -1369,31 +1465,39 @@ func (node *LiteralBoolean) Eq(other Expr) bool {
 	return false
 }
 
-type Float float64
-
-func (f Float) node() {}
-
-type Integer int64
-
-func (f Integer) node() {}
-
-type Boolean bool
-
-func (f Boolean) node() {}
-
-type LiteralNumber struct {
-	Token tik.Token
-	Value AstNode
+func TokenToLiteralInteger(token tik.Token) (LiteralInteger, error) {
+	panic("not implemented")
 }
 
-func (node *LiteralNumber) node()            {}
-func (node *LiteralNumber) nodeExpression()  {}
-func (node *LiteralNumber) nodeLiteral()     {}
-func (node *LiteralNumber) nodePragmaValue() {}
-func (node *LiteralNumber) Eq(other Expr) bool {
-	if otherNumber, ok := other.(*LiteralNumber); ok {
-		// we check the textual value here so we don't compare two floats.
+type LiteralInteger struct {
+	Token tik.Token
+	Value int64
+}
+
+func (node *LiteralInteger) node()            {}
+func (node *LiteralInteger) nodeExpression()  {}
+func (node *LiteralInteger) nodeLiteral()     {}
+func (node *LiteralInteger) nodePragmaValue() {}
+func (node *LiteralInteger) Eq(other Expr) bool {
+	if otherNumber, ok := other.(*LiteralInteger); ok {
 		return otherNumber.Token.Text == node.Token.Text
+	}
+	return false
+}
+
+type LiteralFloat struct {
+	Token tik.Token
+	Value float64
+}
+
+func (node *LiteralFloat) node()            {}
+func (node *LiteralFloat) nodeExpression()  {}
+func (node *LiteralFloat) nodeLiteral()     {}
+func (node *LiteralFloat) nodePragmaValue() {}
+func (node *LiteralFloat) Eq(other Expr) bool {
+	if otherFloat, ok := other.(*LiteralFloat); ok {
+		// we check the text value here as to not compare floats.
+		return otherFloat.Token.Text == node.Token.Text
 	}
 	return false
 }
@@ -1487,6 +1591,18 @@ type BinaryOp struct {
 	Operator tik.Token
 	Lhs      Expr
 	Rhs      Expr
+}
+
+func MakeBinaryOpExpr(
+	lhs Expr,
+	op tik.Token,
+	rhs Expr,
+) *BinaryOp {
+	return &BinaryOp{
+		Operator: op,
+		Lhs:      lhs,
+		Rhs:      rhs,
+	}
 }
 
 func (node *BinaryOp) node()           {}

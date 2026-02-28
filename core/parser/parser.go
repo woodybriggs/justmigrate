@@ -218,3 +218,40 @@ func (p *Parser) MaybeCollation() *ast.Collation {
 		name,
 	)
 }
+
+type PrattParser interface {
+	Term() ast.Expr
+	OperatorBindingPower(token tik.Token) (bp ast.BindingPower, found bool)
+}
+
+func (p *Parser) Expr(
+	minBindingPower int,
+	prattParser PrattParser,
+) ast.Expr {
+	lhs := prattParser.Term()
+
+	for !p.EndOfFile() {
+		bp, found := prattParser.OperatorBindingPower(p.Current())
+		if !found {
+			return lhs
+		}
+		if bp.L < minBindingPower {
+			break
+		}
+
+		op := p.Current()
+		p.Advance()
+
+		rhs := p.Expr(bp.R, prattParser)
+
+		binaryOp := ast.MakeBinaryOpExpr(
+			lhs,
+			op,
+			rhs,
+		)
+
+		lhs = binaryOp
+	}
+
+	return lhs
+}
