@@ -249,7 +249,7 @@ func (p *SqliteParser) ForeignKeyClause() *ast.ForeignKeyClause {
 
 	for !p.EndOfFile() {
 		if p.Current().Kind == tik.TokenKind_Keyword_ON {
-			action := p.ForeignKeyActionDo()
+			action := p.ForeignKeyAction()
 			actions = append(actions, action)
 		} else if p.Current().Kind == tik.TokenKind_Keyword_MATCH {
 			ident := p.Identifier()
@@ -311,8 +311,100 @@ func (p *SqliteParser) ForeignKeyAction() ast.ForeignKeyAction {
 	}
 }
 
-func (p *SqliteParser) ForeignKeyActionDo() *ast.ForeignKeyActionTrigger {
+func (p *SqliteParser) ForeignKeyActionDo() ast.ForeignKeyActionDo {
+	if p.Current().Kind == tik.TokenKind_Keyword_SET {
+		setKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_SET))
+		if p.Current().Kind == tik.TokenKind_Keyword_NULL {
+			nullKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_NULL))
+			return ast.MakeForeignKeyActionSetNull(setKeyword, nullKeyword)
+		} else if p.Current().Kind == tik.TokenKind_Keyword_DEFAULT {
+			defaultKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_DEFAULT))
+			return ast.MakeForeignKeyActionSetDefault(setKeyword, defaultKeyword)
+		} else {
+			p.ReportError(
+				report.NewReport("parse error").
+					WithLabels([]report.Label{
+						{
+							Source: p.Current().SourceCode,
+							Range:  p.Current().SourceRange,
+							Note:   "here",
+						},
+					}).
+					WithMessage("expected 'null' or 'default' for set action of foreign key action"),
+			)
+			return nil
+		}
+	} else if p.Current().Kind == tik.TokenKind_Keyword_NO {
+		noKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_NO))
+		actionKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_ACTION))
+		return ast.MakeForeignKeyActionNoAction(noKeyword, actionKeyword)
+	} else if p.Current().Kind == tik.TokenKind_Keyword_RESTRICT {
+		restrictKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_RESTRICT))
+		return ast.MakeForeignKeyActionRestrict(restrictKeyword)
+	} else if p.Current().Kind == tik.TokenKind_Keyword_CASCADE {
+		cascadeKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_CASCADE))
+		return ast.MakeForeignKeyActionCascade(cascadeKeyword)
+	} else {
+		p.ReportError(
+			report.NewReport("parse error").
+				WithLabels([]report.Label{
+					{
+						Source: p.Current().SourceCode,
+						Range:  p.Current().SourceRange,
+						Note:   "here",
+					},
+				}).
+				WithMessage("expected action: one of ('set null', 'set default', 'no action', 'restrict', 'cascade') for foreign key action"),
+		)
+		return nil
+	}
+}
 
+func (p *SqliteParser) ForeignKeyDeferrable() *ast.ForeignKeyDeferrable {
+	var notKeyword *ast.Keyword = nil
+	if p.Current().Kind == tik.TokenKind_Keyword_NOT {
+		notKeyword = ast.MakeKeyword(p.Current())
+		p.Advance()
+	}
+
+	deferrableKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_DEFERRABLE))
+
+	var initiallyKeyword *ast.Keyword = nil
+	var initiallyValue *ast.Keyword = nil
+	if p.Current().Kind == tik.TokenKind_Keyword_INITIALLY {
+		initiallyKeyword = ast.MakeKeyword(p.Current())
+		p.Advance()
+
+		switch p.Current().Kind {
+		case tik.TokenKind_Keyword_DEFERRED:
+			initiallyValue = ast.MakeKeyword(p.Current())
+			p.Advance()
+		case tik.TokenKind_Keyword_IMMEDIATE:
+			initiallyValue = ast.MakeKeyword(p.Current())
+			p.Advance()
+		default:
+			p.ReportError(
+				report.
+					NewReport("parse errors").
+					WithLabels([]report.Label{
+						{
+							Source: p.Current().SourceCode,
+							Range:  p.Current().SourceRange,
+							Note:   "here",
+						},
+					}).
+					WithMessage("expected value for 'deferrable initially' one of ('deferred' or 'immediate')"),
+			)
+			return nil
+		}
+	}
+
+	return ast.MakeForeignKeyDeferrable(
+		notKeyword,
+		deferrableKeyword,
+		initiallyKeyword,
+		initiallyValue,
+	)
 }
 
 func (p *SqliteParser) TableConstraint_Check(constraintName *ast.ConstraintName) ast.TableConstraint {

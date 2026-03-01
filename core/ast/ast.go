@@ -1018,9 +1018,19 @@ func (node *ForeignKeyClause) Eq(other *ForeignKeyClause) bool {
 }
 
 type ForeignKeyDeferrable struct {
-	Not        *Keyword
-	Initially  *Keyword
-	Deferrable *Keyword
+	NotKeyword        *Keyword
+	DeferrableKeyword Keyword
+	InitiallyKeyword  *Keyword
+	Deferrable        *Keyword
+}
+
+func MakeForeignKeyDeferrable(notKeyword *Keyword, deferrableKeyword Keyword, initiallyKeyword *Keyword, value *Keyword) *ForeignKeyDeferrable {
+	return &ForeignKeyDeferrable{
+		NotKeyword:        notKeyword,
+		DeferrableKeyword: deferrableKeyword,
+		InitiallyKeyword:  initiallyKeyword,
+		Deferrable:        value,
+	}
 }
 
 func (node *ForeignKeyDeferrable) node() {}
@@ -1080,6 +1090,13 @@ type NoAction struct {
 	ActionKeyword Keyword
 }
 
+func MakeForeignKeyActionNoAction(noKeyword Keyword, actionKeyword Keyword) *NoAction {
+	return &NoAction{
+		NoKeyword:     noKeyword,
+		ActionKeyword: actionKeyword,
+	}
+}
+
 func (node *NoAction) node()                   {}
 func (node *NoAction) nodeForeignKeyActionDo() {}
 func (node *NoAction) Eq(other ForeignKeyActionDo) bool {
@@ -1088,6 +1105,11 @@ func (node *NoAction) Eq(other ForeignKeyActionDo) bool {
 }
 
 type Restrict Keyword
+
+func MakeForeignKeyActionRestrict(restrictKeyword Keyword) *Restrict {
+	val := Restrict(restrictKeyword)
+	return &val
+}
 
 func (node *Restrict) node()                   {}
 func (node *Restrict) nodeForeignKeyActionDo() {}
@@ -1099,6 +1121,13 @@ func (node *Restrict) Eq(other ForeignKeyActionDo) bool {
 type SetNull struct {
 	SetKeyword  Keyword
 	NullKeyword Keyword
+}
+
+func MakeForeignKeyActionSetNull(setKeyword Keyword, nullKeyword Keyword) *SetNull {
+	return &SetNull{
+		SetKeyword:  setKeyword,
+		NullKeyword: nullKeyword,
+	}
 }
 
 func (node *SetNull) node()                   {}
@@ -1113,6 +1142,13 @@ type SetDefault struct {
 	DefaultKeyword Keyword
 }
 
+func MakeForeignKeyActionSetDefault(setKeyword Keyword, defaultKeyword Keyword) *SetDefault {
+	return &SetDefault{
+		SetKeyword:     setKeyword,
+		DefaultKeyword: defaultKeyword,
+	}
+}
+
 func (node *SetDefault) node()                   {}
 func (node *SetDefault) nodeForeignKeyActionDo() {}
 func (node *SetDefault) Eq(other ForeignKeyActionDo) bool {
@@ -1121,6 +1157,11 @@ func (node *SetDefault) Eq(other ForeignKeyActionDo) bool {
 }
 
 type Cascade Keyword
+
+func MakeForeignKeyActionCascade(cascadeKeyword Keyword) *Cascade {
+	val := Cascade(cascadeKeyword)
+	return &val
+}
 
 func (node *Cascade) node()                   {}
 func (node *Cascade) nodeForeignKeyActionDo() {}
