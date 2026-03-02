@@ -6,17 +6,15 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"maps"
 	"os"
-	"slices"
 
 	"woodybriggs/justmigrate/core/ast"
 	"woodybriggs/justmigrate/core/luther"
 	"woodybriggs/justmigrate/core/report"
 	"woodybriggs/justmigrate/database"
-	sqlite "woodybriggs/justmigrate/dialects/sqlite/generator"
+	sqlitegenerator "woodybriggs/justmigrate/dialects/sqlite/generator"
+	sqliteparser "woodybriggs/justmigrate/dialects/sqlite/parser"
 	"woodybriggs/justmigrate/diff"
-	"woodybriggs/justmigrate/parser"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -67,13 +65,13 @@ func AstFromDatabase(database Database) (luther.SourceCode, []ast.Statement, err
 		},
 	)
 
-	parser := parser.NewParser(lexer)
+	parser := sqliteparser.NewSqliteParser(lexer)
 
 	nodes := parser.Statements()
-	errors := slices.Collect(maps.Values(parser.Errors))
+	errors := parser.Errors()
 	if len(errors) > 0 {
 		ShowErrors(errors, os.Stderr)
-		return parser.Lexer.SourceCode, nil, ErrParserErrors
+		return parser.Current().SourceCode, nil, ErrParserErrors
 	}
 
 	// warnings := slices.Collect(maps.Values(parser.Warnings))
@@ -81,7 +79,7 @@ func AstFromDatabase(database Database) (luther.SourceCode, []ast.Statement, err
 	// 	ShowWarnings(warnings, os.Stderr)
 	// }
 
-	return parser.Lexer.SourceCode, nodes, nil
+	return parser.Parser.Current().SourceCode, nodes, nil
 }
 
 func AstFromFile(file *os.File) (luther.SourceCode, []ast.Statement, error) {
@@ -90,10 +88,10 @@ func AstFromFile(file *os.File) (luther.SourceCode, []ast.Statement, error) {
 		return lexer.SourceCode, nil, err
 	}
 
-	parser := parser.NewParser(lexer)
+	parser := sqliteparser.NewSqliteParser(lexer)
 
 	nodes := parser.Statements()
-	errors := slices.Collect(maps.Values(parser.Errors))
+	errors := parser.Errors()
 
 	if len(errors) > 0 {
 		ShowErrors(errors, os.Stderr)
@@ -112,7 +110,7 @@ func main() {
 
 	var err error
 
-	databaseURL := "/Users/woodybriggs/Projects/ts/currx/database/local.db"
+	databaseURL := "resources/database.db"
 
 	conn, err := sql.Open("sqlite3", databaseURL)
 	if err != nil {
@@ -145,7 +143,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	generate := sqlite.NewSqliteGenerator(edits)
+	generate := sqlitegenerator.NewSqliteGenerator(edits)
 
 	generate.Generate(os.Stderr)
 }

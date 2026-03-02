@@ -205,7 +205,7 @@ func (t *Lexer) identifier() string {
 	return string(t.Raw[start:end])
 }
 
-func (t *Lexer) decimalNumeric() string {
+func (t *Lexer) decimalNumeric() (string, bool) {
 	start := t.Cur
 	hasPeriod := false
 	hasExpon := false
@@ -236,7 +236,7 @@ func (t *Lexer) decimalNumeric() string {
 	}
 
 	end := t.Cur
-	return string(t.Raw[start:end])
+	return string(t.Raw[start:end]), hasPeriod || hasExpon
 }
 
 func (t *Lexer) hexNumeric() string {
@@ -438,8 +438,13 @@ func (t *Lexer) NextToken() (token tik.Token) {
 	case '.':
 		{
 			if p, err := t.peekRune(); err != io.EOF && unicode.IsDigit(p) {
-				token.Kind = tik.TokenKind_DecimalNumericLiteral
-				token.Text = t.decimalNumeric()
+				text, isFloat := t.decimalNumeric()
+				if isFloat {
+					token.Kind = tik.TokenKind_FloatNumericLiteral
+				} else {
+					token.Kind = tik.TokenKind_IntegerNumericLiteral
+				}
+				token.Text = text
 				return token
 			}
 			t.eat()
@@ -473,8 +478,13 @@ func (t *Lexer) NextToken() (token tik.Token) {
 		fallthrough
 	case '1', '2', '3', '4', '5', '6', '7', '8', '9':
 		{
-			token.Kind = tik.TokenKind_DecimalNumericLiteral
-			token.Text = t.decimalNumeric()
+			text, isFloat := t.decimalNumeric()
+			token.Text = text
+			if isFloat {
+				token.Kind = tik.TokenKind_FloatNumericLiteral
+			} else {
+				token.Kind = tik.TokenKind_IntegerNumericLiteral
+			}
 			return token
 		}
 	}

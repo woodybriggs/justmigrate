@@ -22,7 +22,7 @@ type EditRemoveTable struct {
 
 func (edit *EditRemoveTable) edit() {}
 func (edit *EditRemoveTable) String() string {
-	return fmt.Sprintf("remove table: \"%s\"", edit.TableIdentifier.FullyQualifiedName("main"))
+	return fmt.Sprintf("remove table: \"%s\"", edit.TableIdentifier.ObjectName.Text)
 }
 
 type EditAddTable struct {
@@ -31,7 +31,7 @@ type EditAddTable struct {
 
 func (edit *EditAddTable) edit() {}
 func (edit *EditAddTable) String() string {
-	return fmt.Sprintf("add table: \"%s\"", edit.TableIdentifier.FullyQualifiedName("main"))
+	return fmt.Sprintf("add table: \"%s\"", edit.TableIdentifier.ObjectName.Text)
 }
 
 type EditModifyTable struct {
@@ -43,7 +43,7 @@ func (edit *EditModifyTable) edit() {}
 func (edit *EditModifyTable) String() string {
 	builder := strings.Builder{}
 
-	fmt.Fprintf(&builder, "modify table: \"%s\"\n", edit.Target.TableIdentifier.FullyQualifiedName("main"))
+	fmt.Fprintf(&builder, "modify table: \"%s\"\n", edit.Target.TableIdentifier.ObjectName.Text)
 	for _, edit := range edit.Edits {
 		builder.WriteString(edit.String())
 	}

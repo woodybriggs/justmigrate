@@ -6,6 +6,7 @@ import (
 	"slices"
 	"woodybriggs/justmigrate/core/ast"
 	"woodybriggs/justmigrate/core/tik"
+	sqliteformatter "woodybriggs/justmigrate/dialects/sqlite/formatter"
 	"woodybriggs/justmigrate/diff"
 	"woodybriggs/justmigrate/formatter"
 )
@@ -47,13 +48,8 @@ func (gen *SqliteGenerator) Generate(writer io.Writer) {
 	}
 
 	core := formatter.NewCoreFormatter(os.Stderr, 80, "\"\"")
-
-	for _, statement := range statements {
-		statement.ToSql(core)
-		core.Rune(';')
-		core.Break()
-		core.Break()
-	}
+	form := &sqliteformatter.SqliteFormatter{Formatter: core}
+	form.VisitStatements(statements)
 }
 
 func alterTable(table *ast.CreateTable, edits []diff.Edit) []ast.Statement {

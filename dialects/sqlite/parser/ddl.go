@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"fmt"
 	"woodybriggs/justmigrate/core/ast"
 	"woodybriggs/justmigrate/core/report"
 	"woodybriggs/justmigrate/core/tik"
@@ -76,23 +77,79 @@ func (p *SqliteParser) CreateTableStatement(isTemporary bool) *ast.CreateTable {
 }
 
 func (p *SqliteParser) CreateViewStatement(false bool) ast.Statement {
-	panic("unimplemented")
+	panic(fmt.Errorf("%w: CreateViewStatement", ErrNotImplemented))
 }
 
 func (p *SqliteParser) CreateTriggerStatement(false bool) ast.Statement {
-	panic("unimplemented")
+	panic(fmt.Errorf("%w: CreateTriggerStatement", ErrNotImplemented))
 }
 
 func (p *SqliteParser) CreateIndexStatement(isUnique bool) ast.Statement {
-	panic("unimplemented")
+	createKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_CREATE))
+
+	var uniqueKeyword *ast.Keyword = nil
+	if p.Current().Kind == tik.TokenKind_Keyword_UNIQUE {
+		uniqueKeyword = ast.MakeKeyword(p.Current())
+		p.Advance()
+	}
+
+	indexKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_INDEX))
+
+	ifNotExists := p.MaybeIfNotExists()
+
+	indexIdentifier := p.CatalogObjectIdentifier()
+
+	onKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_ON))
+
+	tableName := p.Identifier()
+
+	lParen := p.Expect('(')
+
+	indexedCols := []ast.IndexedColumn{}
+	for !p.EndOfFile() {
+		if p.Current().Kind == ')' {
+			break
+		} else if p.Current().Kind == ',' {
+			p.Advance()
+			continue
+		} else {
+			indexedCol := p.IndexedColumn(true)
+			indexedCols = append(indexedCols, indexedCol)
+		}
+	}
+
+	rParen := p.Expect(')')
+
+	var whereKeyword *ast.Keyword = nil
+	var whereExpr ast.Expr = nil
+	if p.Current().Kind == tik.TokenKind_Keyword_WHERE {
+		whereKeyword = ast.MakeKeyword(p.Current())
+		p.Advance()
+		whereExpr = p.Expr(0)
+	}
+
+	return ast.MakeCreateIndex(
+		createKeyword,
+		uniqueKeyword,
+		indexKeyword,
+		ifNotExists,
+		indexIdentifier,
+		onKeyword,
+		tableName,
+		lParen,
+		indexedCols,
+		rParen,
+		whereKeyword,
+		whereExpr,
+	)
 }
 
 func (p *SqliteParser) CreateVirtualTableStatement() ast.Statement {
-	panic("unimplemented")
+	panic(fmt.Errorf("%w: CreateVirtualTableStatement", ErrNotImplemented))
 }
 
 func (p *SqliteParser) CreateTemporaryStatement() ast.Statement {
-	panic("unimplemented")
+	panic(fmt.Errorf("%w: CreateTemporaryStatement", ErrNotImplemented))
 }
 
 func (p *SqliteParser) MaybeIfNotExists() *ast.IfNotExists {

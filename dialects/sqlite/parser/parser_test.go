@@ -3,8 +3,12 @@ package sqlite
 import (
 	"fmt"
 	"runtime"
+	"strings"
 	"testing"
+	"woodybriggs/justmigrate/core/ast"
 	"woodybriggs/justmigrate/core/luther"
+	"woodybriggs/justmigrate/core/tik"
+	"woodybriggs/justmigrate/formatter"
 )
 
 func makeParser(input string) *SqliteParser {
@@ -24,11 +28,42 @@ func makeParser(input string) *SqliteParser {
 	return NewSqliteParser(lex)
 }
 
-func TestCreateTable(t *testing.T) {
-	parser := makeParser("CREATE TABLE IF NOT EXISTS users (id integer PRIMARY KEY AUTOINCREMENT)")
+func makeFormatter() (*strings.Builder, *formatter.CoreFormatter) {
+	sb := &strings.Builder{}
+	return sb, formatter.NewCoreFormatter(sb, 300, "")
+}
 
-	createTable := parser.CreateTableStatement(false)
-	fmt.Println(createTable)
+func TestCreateTable(t *testing.T) {
+	expectedStr := "CREATE TABLE IF NOT EXISTS users (\n\tid integer PRIMARY KEY AUTOINCREMENT\n)"
+	parser := makeParser(expectedStr)
+
+	parsedAst := parser.Statement()
+	expectedAst := &ast.CreateTable{
+		TableIdentifier: &ast.CatalogObjectIdentifier{
+			ObjectName: ast.Identifier{Text: "users"},
+		},
+		TableDefinition: &ast.TableDefinition{
+			ColumnDefinitions: []ast.ColumnDefinition{
+				{
+					ColumnName: ast.Identifier{Text: "id"},
+					TypeName: ast.TypeName{
+						TypeName: ast.Identifier{
+							Text: "integer",
+						},
+					},
+					ColumnConstraints: []ast.ColumnConstraint{
+						&ast.ColumnConstraint_PrimaryKey{
+							AutoIncrement: &ast.Keyword{Kind: tik.TokenKind_Keyword_AUTOINCREMENT},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if !parsedAst.Eq(expectedAst) {
+		t.Fail()
+	}
 }
 
 func TestParseIdentifier(t *testing.T) {

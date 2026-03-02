@@ -49,7 +49,7 @@ func (p *SqliteParser) TableConstraints() []ast.TableConstraint {
 	result := []ast.TableConstraint{}
 
 	for !p.EndOfFile() {
-		if p.Current().Kind == '(' {
+		if p.Current().Kind == ')' {
 			break
 		} else if p.Current().Kind == ',' {
 			p.Advance()
@@ -489,20 +489,20 @@ func (p *SqliteParser) ColumnConstraint() ast.ColumnConstraint {
 	switch p.Current().Kind {
 	case tik.TokenKind_Keyword_PRIMARY:
 		return p.ColumnConstraint_PrimaryKey(constraintName)
-	// case tik.TokenKind_Keyword_NOT:
-	// 	return p.ColumnConstraint_NotNull(constraintName)
-	// case tik.TokenKind_Keyword_DEFAULT:
-	// 	return p.ColumnConstraint_Default(constraintName)
-	// case tik.TokenKind_Keyword_UNIQUE:
-	// 	return p.ColumnConstraint_Unique(constraintName)
-	// case tik.TokenKind_Keyword_COLLATE:
-	// 	return p.ColumnConstraint_Collate(constraintName)
-	// case tik.TokenKind_Keyword_CHECK:
-	// 	return p.ColumnConstraint_Check(constraintName)
-	// case tik.TokenKind_Keyword_AS:
-	// 	return p.ColumnConstraint_Generated(constraintName)
-	// case tik.TokenKind_Keyword_GENERATED:
-	// 	return p.ColumnConstraint_Generated(constraintName)
+	case tik.TokenKind_Keyword_NOT:
+		return p.ColumnConstraint_NotNull(constraintName)
+	case tik.TokenKind_Keyword_DEFAULT:
+		return p.ColumnConstraint_Default(constraintName)
+	case tik.TokenKind_Keyword_UNIQUE:
+		return p.ColumnConstraint_Unique(constraintName)
+	case tik.TokenKind_Keyword_COLLATE:
+		return p.ColumnConstraint_Collate(constraintName)
+	case tik.TokenKind_Keyword_CHECK:
+		return p.ColumnConstraint_Check(constraintName)
+	case tik.TokenKind_Keyword_AS:
+		return p.ColumnConstraint_Generated(constraintName)
+	case tik.TokenKind_Keyword_GENERATED:
+		return p.ColumnConstraint_Generated(constraintName)
 	default:
 		{
 			p.ReportError(

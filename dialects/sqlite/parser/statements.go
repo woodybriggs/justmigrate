@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"runtime/debug"
 	"woodybriggs/justmigrate/core/ast"
@@ -40,8 +41,11 @@ func (p *SqliteParser) Statement() ast.Statement {
 
 	switch p.Current().Kind {
 	case tik.TokenKind_Keyword_CREATE:
-		return p.CreateStatement()
+		stmt := p.CreateStatement()
+		fmt.Println(stmt)
+		return stmt
 	default:
-		panic("not implemented")
+		fmt.Println(p.Current().Text)
+		panic(ErrNotImplemented)
 	}
 }

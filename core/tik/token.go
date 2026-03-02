@@ -25,7 +25,8 @@ var TokenKindDebugString = map[TokenKind]string{
 	TokenKind_gte:                   "greater-than-equal",
 	TokenKind_lte:                   "less-than-equal",
 	TokenKind_Identifier:            "identifier",
-	TokenKind_DecimalNumericLiteral: "decimal-numeric-literal",
+	TokenKind_FloatNumericLiteral:   "float-numeric-literal",
+	TokenKind_IntegerNumericLiteral: "integer-numeric-literal",
 	TokenKind_HexNumericLiteral:     "hex-numeric-literal",
 	TokenKind_BinaryNumericLiteral:  "binary-numeric-literal",
 	TokenKind_OctalNumericLiteral:   "octal-numeric-literal",
@@ -67,7 +68,8 @@ const (
 
 const (
 	TokenKind_Identifier TokenKind = iota + 1 + TokenKindOffset_Atoms
-	TokenKind_DecimalNumericLiteral
+	TokenKind_FloatNumericLiteral
+	TokenKind_IntegerNumericLiteral
 	TokenKind_HexNumericLiteral
 	TokenKind_BinaryNumericLiteral
 	TokenKind_OctalNumericLiteral

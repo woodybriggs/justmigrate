@@ -1,0 +1,159 @@
+package ast
+
+type Visitor interface {
+	// VisitColumnConstraintForeignKey(*ColumnConstraint_ForeignKey)
+
+	VisitDropTable(*DropTable)
+
+	VisitCreateTable(*CreateTable)
+	VisitCreateIndex(*CreateIndex)
+	VisitCreateView(*CreateView)
+	VisitAlterTable(*AlterTable)
+
+	VisitTableConstraintCheck(*TableConstraint_Check)
+	VisitTableConstraintPrimaryKey(*TableConstraint_PrimaryKey)
+	VisitTableConstraintForeignKey(*TableConstraint_ForeignKey)
+
+	VisitColumnConstraintPrimaryKey(*ColumnConstraint_PrimaryKey)
+	VisitColumnConstraintDefault(*ColumnConstraint_Default)
+	VisitColumnConstraintCheck(*ColumnConstraint_Check)
+	VisitColumnConstraintUnique(*ColumnConstraint_Unique)
+	VisitColumnConstraintGenerated(*ColumnConstraint_Generated)
+	VisitColumnConstraintCollate(*ColumnConstraint_Collate)
+	VisitColumnConstraintNotNull(*ColumnConstraint_NotNull)
+
+	VisitForeignKeyDeleteAction(*ForeignKeyDeleteAction)
+	VisitForeignKeyUpdateAction(*ForeignKeyUpdateAction)
+
+	VisitIdentifier(*Identifier)
+	VisitExprList(ExprList)
+	VisitLiteralString(*LiteralString)
+	VisitLiteralBoolean(*LiteralBoolean)
+	VisitLiteralSignedInteger(*LiteralSignedInteger)
+	VisitLiteralUnsignedInteger(*LiteralUnsignedInteger)
+	VisitLiteralFloat(*LiteralFloat)
+	VisitLiteralNull(*LiteralNull)
+
+	VisitFunctionCall(*FunctionCall)
+	VisitColumnName(*ColumnName)
+	VisitBinaryOp(*BinaryOp)
+	VisitCaseExpression(*CaseExpression)
+}
+
+func (node *DropTable) Accept(v Visitor) {
+	v.VisitDropTable(node)
+}
+
+func (node *CreateTable) Accept(v Visitor) {
+	v.VisitCreateTable(node)
+}
+
+func (node *CreateView) Accept(v Visitor) {
+	v.VisitCreateView(node)
+}
+
+func (node *CreateIndex) Accept(v Visitor) {
+	v.VisitCreateIndex(node)
+}
+
+func (node *AlterTable) Accept(v Visitor) {
+	v.VisitAlterTable(node)
+}
+
+func (node *TableConstraint_Check) Accept(v Visitor) {
+	v.VisitTableConstraintCheck(node)
+}
+
+func (node *TableConstraint_PrimaryKey) Accept(v Visitor) {
+	v.VisitTableConstraintPrimaryKey(node)
+}
+
+func (node *TableConstraint_ForeignKey) Accept(v Visitor) {
+	v.VisitTableConstraintForeignKey(node)
+}
+
+func (node *ColumnConstraint_PrimaryKey) Accept(v Visitor) {
+	v.VisitColumnConstraintPrimaryKey(node)
+}
+
+func (node *ColumnConstraint_Default) Accept(v Visitor) {
+	v.VisitColumnConstraintDefault(node)
+}
+
+func (node *ColumnConstraint_Check) Accept(v Visitor) {
+	v.VisitColumnConstraintCheck(node)
+}
+
+func (node *ColumnConstraint_Unique) Accept(v Visitor) {
+	v.VisitColumnConstraintUnique(node)
+}
+
+func (node *ColumnConstraint_Generated) Accept(v Visitor) {
+	v.VisitColumnConstraintGenerated(node)
+}
+
+func (node *ColumnConstraint_Collate) Accept(v Visitor) {
+	v.VisitColumnConstraintCollate(node)
+}
+
+func (node *ColumnConstraint_NotNull) Accept(v Visitor) {
+	v.VisitColumnConstraintNotNull(node)
+}
+
+func (node *ForeignKeyDeleteAction) Accept(v Visitor) {
+	v.VisitForeignKeyDeleteAction(node)
+}
+
+func (node *ForeignKeyUpdateAction) Accept(v Visitor) {
+	v.VisitForeignKeyUpdateAction(node)
+}
+
+func (node ExprList) Accept(v Visitor) {
+	v.VisitExprList(node)
+}
+
+func (node *LiteralBoolean) Accept(v Visitor) {
+	v.VisitLiteralBoolean(node)
+}
+
+func (node *LiteralFloat) Accept(v Visitor) {
+	v.VisitLiteralFloat(node)
+}
+
+func (node *LiteralNull) Accept(v Visitor) {
+	v.VisitLiteralNull(node)
+}
+
+func (node *LiteralSignedInteger) Accept(v Visitor) {
+	v.VisitLiteralSignedInteger(node)
+}
+
+func (node *LiteralUnsignedInteger) Accept(v Visitor) {
+	v.VisitLiteralUnsignedInteger(node)
+}
+
+func (node *LiteralString) Accept(v Visitor) {
+	v.VisitLiteralString(node)
+}
+
+func (node *Identifier) Accept(v Visitor) {
+	v.VisitIdentifier(node)
+}
+
+func (node *FunctionCall) Accept(v Visitor) {
+	v.VisitFunctionCall(node)
+}
+
+func (node *ColumnName) Accept(v Visitor) {
+	v.VisitColumnName(node)
+}
+
+func (node *BinaryOp) Accept(v Visitor) {
+	v.VisitBinaryOp(node)
+}
+
+func (node *CaseExpression) Accept(v Visitor) {
+	v.VisitCaseExpression(node)
+}
+
+// func (node *ColumnConstraint_ForeignKey) Accept(v Visitor)
