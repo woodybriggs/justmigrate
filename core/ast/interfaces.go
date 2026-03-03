@@ -17,6 +17,7 @@ func (node *CreateTrigger) nodeStatement()     {}
 
 type TableAlteration interface {
 	Equalable[TableAlteration]
+	Accept(Visitor)
 	tableAlteration()
 }
 
@@ -60,6 +61,7 @@ func (node *ForeignKeyUpdateAction) nodeForeignKeyAction() {}
 
 type ForeignKeyActionDo interface {
 	Equalable[ForeignKeyActionDo]
+	Accept(Visitor)
 	nodeForeignKeyActionDo()
 }
 
@@ -87,3 +89,11 @@ func (node *LiteralSignedInteger) nodeExpression()   {}
 func (node *LiteralUnsignedInteger) nodeExpression() {}
 func (node *LiteralString) nodeExpression()          {}
 func (node *LiteralNull) nodeExpression()            {}
+
+type NumericLiteral interface {
+	nodeNumericLiteral()
+}
+
+func (node *LiteralFloat) nodeNumericLiteral()           {}
+func (node *LiteralSignedInteger) nodeNumericLiteral()   {}
+func (node *LiteralUnsignedInteger) nodeNumericLiteral() {}

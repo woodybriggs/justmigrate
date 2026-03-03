@@ -111,7 +111,7 @@ type EditChangeColumnType struct {
 
 func (edit *EditChangeColumnType) edit() {}
 func (edit *EditChangeColumnType) String() string {
-	return fmt.Sprintf("change column type: from %s to %s\n", edit.From.TypeName.Text, edit.To.TypeName.Text)
+	return fmt.Sprintf("change column type: from %s to %s\n", edit.From.Name, edit.To.Name.Text)
 }
 
 type EditRemoveColumnConstraint struct {

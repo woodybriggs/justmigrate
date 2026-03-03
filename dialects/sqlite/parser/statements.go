@@ -41,11 +41,10 @@ func (p *SqliteParser) Statement() ast.Statement {
 
 	switch p.Current().Kind {
 	case tik.TokenKind_Keyword_CREATE:
-		stmt := p.CreateStatement()
-		fmt.Println(stmt)
-		return stmt
+		return p.CreateStatement()
 	default:
-		fmt.Println(p.Current().Text)
+		fmt.Fprintf(os.Stderr, "unhandled statement")
+		os.Exit(1)
 		panic(ErrNotImplemented)
 	}
 }

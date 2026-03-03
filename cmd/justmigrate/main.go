@@ -122,16 +122,19 @@ func main() {
 	fileName := "resources/schema.sql"
 	file, err := os.Open(fileName)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "open file failed with err %v", err)
 		os.Exit(1)
 	}
 
 	_, dstAst, err := AstFromFile(file)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "ast from file failed with err %v", err)
 		os.Exit(1)
 	}
 
 	_, srcAst, err := AstFromDatabase(db)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "ast from database failed with err %v", err)
 		os.Exit(1)
 	}
 
@@ -139,7 +142,7 @@ func main() {
 
 	edits, err := differ.DiffSchema(srcAst, dstAst)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintf(os.Stderr, "diff schema failed with err %v", err)
 		os.Exit(1)
 	}
 

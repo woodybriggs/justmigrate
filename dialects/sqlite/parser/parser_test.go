@@ -46,8 +46,8 @@ func TestCreateTable(t *testing.T) {
 			ColumnDefinitions: []ast.ColumnDefinition{
 				{
 					ColumnName: ast.Identifier{Text: "id"},
-					TypeName: ast.TypeName{
-						TypeName: ast.Identifier{
+					TypeName: &ast.TypeName{
+						Name: ast.Identifier{
 							Text: "integer",
 						},
 					},

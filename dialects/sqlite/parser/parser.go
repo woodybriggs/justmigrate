@@ -3,6 +3,7 @@ package sqlite
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"woodybriggs/justmigrate/core/ast"
 	"woodybriggs/justmigrate/core/luther"
 	"woodybriggs/justmigrate/core/parser"
@@ -131,7 +132,7 @@ func (p *SqliteParser) TableConstraint_PrimaryKey(constraintName *ast.Constraint
 
 	if autoincrement == nil {
 		for !p.EndOfFile() {
-			if p.Current().Kind == '(' {
+			if p.Current().Kind == ')' {
 				break
 			} else if p.Current().Kind == ',' {
 				p.Advance()
@@ -187,8 +188,8 @@ func (p *SqliteParser) TableConstraint_ForeignKey(constraintName *ast.Constraint
 	p.PushParseContext("foreign key table constraint")
 	defer p.PopParseContext()
 
-	foreign := ast.Keyword(p.Expect(tik.TokenKind_Keyword_FOREIGN))
-	key := ast.Keyword(p.Expect(tik.TokenKind_Keyword_KEY))
+	foreignKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_FOREIGN))
+	keyKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_KEY))
 
 	lParen := p.Expect('(')
 
@@ -210,8 +211,8 @@ func (p *SqliteParser) TableConstraint_ForeignKey(constraintName *ast.Constraint
 	fkClause := p.ForeignKeyClause()
 	return ast.MakeTableConstraintForeignKey(
 		constraintName,
-		foreign,
-		key,
+		foreignKeyword,
+		keyKeyword,
 		lParen,
 		columnNames,
 		rParen,
@@ -436,15 +437,16 @@ func (p *SqliteParser) ColumnDefinitions() []ast.ColumnDefinition {
 	definitions := []ast.ColumnDefinition{}
 
 	for !p.EndOfFile() {
-		if p.Current().Kind == ',' {
-			p.Advance()
-			continue
-		} else if p.Current().Kind == ')' {
+		if p.Current().Kind == ')' {
 			break
+		} else if isTableConstraintStartingToken(p.Current()) {
+			break
+		} else if p.Current().Kind == ',' {
+			p.Advance()
+		} else {
+			columnDef := p.ColumnDefinition()
+			definitions = append(definitions, *columnDef)
 		}
-
-		columnDef := p.ColumnDefinition()
-		definitions = append(definitions, *columnDef)
 	}
 
 	return definitions
@@ -455,7 +457,7 @@ func (p *SqliteParser) ColumnDefinition() *ast.ColumnDefinition {
 	defer p.PopParseContext()
 
 	columnName := p.Identifier()
-	typeName := p.Identifier()
+	typeName := p.MaybeTypeName()
 	columnConstraints := p.ColumnConstraints()
 
 	return ast.MakeColumnDefinition(
@@ -463,6 +465,103 @@ func (p *SqliteParser) ColumnDefinition() *ast.ColumnDefinition {
 		typeName,
 		columnConstraints,
 	)
+}
+
+func (p *SqliteParser) MaybeTypeName() *ast.TypeName {
+	if p.Current().Kind != tik.TokenKind_Identifier {
+		return nil
+	}
+
+	name := p.Identifier()
+	var arg0 ast.NumericLiteral = nil
+	var arg1 ast.NumericLiteral = nil
+
+	if p.Current().Kind == '(' {
+		p.Advance()
+		arg0 = p.SignedNumber()
+
+		if p.Current().Kind == ',' {
+			p.Advance()
+			arg1 = p.SignedNumber()
+		}
+
+		p.Expect(')')
+	}
+
+	return ast.MakeTypeName(name, arg0, arg1)
+}
+
+func (p *SqliteParser) SignedNumber() ast.NumericLiteral {
+
+	if p.Current().Kind == '+' {
+		p.Advance()
+	}
+
+	var negate *tik.Token = nil
+	if p.Current().Kind == '-' {
+		tok := p.Current()
+		negate = &tok
+		p.Advance()
+	}
+
+	return p.LiteralNumericLiteral(negate)
+}
+
+func (p *SqliteParser) LiteralNumericLiteral(negate *tik.Token) ast.NumericLiteral {
+	switch token := p.Current(); token.Kind {
+	case tik.TokenKind_IntegerNumericLiteral:
+		p.Advance()
+		val, err := strconv.ParseInt(token.Text, 10, 64)
+		if err != nil {
+			rep := report.NewReport("parse error").WithMessage(err.Error()).WithLabels([]report.Label{{
+				Source: token.SourceCode,
+				Range:  token.SourceRange,
+				Note:   "here",
+			}})
+			p.Parser.ReportError(rep)
+			return ast.MakeLiteralSignedInteger(token, 0)
+		}
+		if negate != nil {
+			val = val * -1
+		}
+		return ast.MakeLiteralSignedInteger(token, val)
+	case tik.TokenKind_FloatNumericLiteral:
+		p.Advance()
+		val, err := strconv.ParseFloat(token.Text, 64)
+		if err != nil {
+			rep := report.NewReport("parse error").WithMessage(err.Error()).WithLabels([]report.Label{{
+				Source: token.SourceCode,
+				Range:  token.SourceRange,
+				Note:   "here",
+			}})
+			p.Parser.ReportError(rep)
+			return ast.MakeLiteralFloat(token, 0)
+		}
+		if negate != nil {
+			val = val * -1
+		}
+		return ast.MakeLiteralFloat(token, val)
+	default:
+		rep := report.NewReport("parse error").
+			WithMessage("expected numeric literal (signed integer or float)").
+			WithLabels([]report.Label{
+				{
+					Source: token.SourceCode,
+					Range:  token.SourceRange,
+					Note:   "here",
+				},
+			})
+		p.ReportError(rep)
+
+		// if the next token is a numeric literal, then we can skip the token and try parse again
+		if p.Peeked().Kind == tik.TokenKind_IntegerNumericLiteral || p.Peeked().Kind == tik.TokenKind_FloatNumericLiteral {
+			p.Advance()
+			return p.LiteralNumericLiteral(negate)
+		}
+
+		// otherwise synthesize the node with 0 value
+		return ast.MakeLiteralSignedInteger(token, 0)
+	}
 }
 
 func (p *SqliteParser) ColumnConstraints() []ast.ColumnConstraint {
@@ -480,6 +579,48 @@ func (p *SqliteParser) ColumnConstraints() []ast.ColumnConstraint {
 	return result
 }
 
+func isTableConstraintStartingToken(token tik.Token) bool {
+	switch token.Kind {
+	case tik.TokenKind_Keyword_CONSTRAINT:
+		return true
+	case tik.TokenKind_Keyword_PRIMARY:
+		return true
+	case tik.TokenKind_Keyword_UNIQUE:
+		return true
+	case tik.TokenKind_Keyword_CHECK:
+		return true
+	case tik.TokenKind_Keyword_FOREIGN:
+		return true
+	default:
+		return false
+	}
+}
+
+func isColumnConstraintStartingToken(token tik.Token) bool {
+	switch token.Kind {
+	case tik.TokenKind_Keyword_CONSTRAINT:
+		return true
+	case tik.TokenKind_Keyword_PRIMARY:
+		return true
+	case tik.TokenKind_Keyword_NOT:
+		return true
+	case tik.TokenKind_Keyword_DEFAULT:
+		return true
+	case tik.TokenKind_Keyword_UNIQUE:
+		return true
+	case tik.TokenKind_Keyword_COLLATE:
+		return true
+	case tik.TokenKind_Keyword_CHECK:
+		return true
+	case tik.TokenKind_Keyword_AS:
+		return true
+	case tik.TokenKind_Keyword_GENERATED:
+		return true
+	default:
+		return false
+	}
+}
+
 func (p *SqliteParser) ColumnConstraint() ast.ColumnConstraint {
 	p.PushParseContext("column constraint")
 	defer p.PopParseContext()
@@ -493,16 +634,16 @@ func (p *SqliteParser) ColumnConstraint() ast.ColumnConstraint {
 		return p.ColumnConstraint_NotNull(constraintName)
 	case tik.TokenKind_Keyword_DEFAULT:
 		return p.ColumnConstraint_Default(constraintName)
-	case tik.TokenKind_Keyword_UNIQUE:
-		return p.ColumnConstraint_Unique(constraintName)
-	case tik.TokenKind_Keyword_COLLATE:
-		return p.ColumnConstraint_Collate(constraintName)
-	case tik.TokenKind_Keyword_CHECK:
-		return p.ColumnConstraint_Check(constraintName)
-	case tik.TokenKind_Keyword_AS:
-		return p.ColumnConstraint_Generated(constraintName)
-	case tik.TokenKind_Keyword_GENERATED:
-		return p.ColumnConstraint_Generated(constraintName)
+		//	case tik.TokenKind_Keyword_UNIQUE:
+		//		return p.ColumnConstraint_Unique(constraintName)
+		//	case tik.TokenKind_Keyword_COLLATE:
+		//		return p.ColumnConstraint_Collate(constraintName)
+		//	case tik.TokenKind_Keyword_CHECK:
+		//		return p.ColumnConstraint_Check(constraintName)
+		//	case tik.TokenKind_Keyword_AS:
+		//		return p.ColumnConstraint_Generated(constraintName)
+		//	case tik.TokenKind_Keyword_GENERATED:
+		//		return p.ColumnConstraint_Generated(constraintName)
 	default:
 		{
 			p.ReportError(
@@ -545,6 +686,56 @@ func (p *SqliteParser) ColumnConstraint_PrimaryKey(constraintName *ast.Constrain
 		conflictClause,
 		autoincrement,
 	)
+}
+
+func (p *SqliteParser) ColumnConstraint_NotNull(constraintName *ast.ConstraintName) *ast.ColumnConstraint_NotNull {
+	p.PushParseContext("not null column constraint")
+	defer p.PopParseContext()
+
+	notKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_NOT))
+	nullKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_NULL))
+
+	conflictClause := p.MaybeConflictClause()
+
+	return ast.MakeColumnConstraintNotNull(
+		constraintName,
+		notKeyword,
+		nullKeyword,
+		conflictClause,
+	)
+}
+
+func (p *SqliteParser) ColumnConstraint_Default(constraintName *ast.ConstraintName) *ast.ColumnConstraint_Default {
+	p.PushParseContext("default column constraint")
+	defer p.PopParseContext()
+
+	defaultKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_DEFAULT))
+
+	if p.Current().Kind == '(' {
+		p.Advance()
+		expr := p.Expr(0)
+		p.Expect(')')
+		return ast.MakeColumnConstraintDefault(constraintName, defaultKeyword, expr)
+	}
+
+	lit, err := ast.TokenToLiteral(p.Current())
+	if err != nil {
+		rep := report.NewReport("parse error").
+			WithMessage("expected '(expr)' or literal value for DEFAULT column constraint)").
+			WithLabels([]report.Label{{Source: p.Current().SourceCode, Range: p.Current().SourceRange, Note: "here"}})
+		p.ReportError(rep)
+
+		// if the next token ahead is the start of a new column constraint or the end of column/table def
+		// then we can skip the current token with the reported error above
+		lit = ast.MakeLiteralNull(p.Current())
+		if isColumnConstraintStartingToken(p.Peeked()) || p.Peeked().Kind == ',' || p.Peeked().Kind == ')' {
+			p.Advance()
+		}
+
+		return ast.MakeColumnConstraintDefault(constraintName, defaultKeyword, lit)
+	}
+
+	return ast.MakeColumnConstraintDefault(constraintName, defaultKeyword, lit)
 }
 
 func (p *SqliteParser) MaybeConstraintName() *ast.ConstraintName {
@@ -625,12 +816,16 @@ func (p *SqliteParser) Expr(minBindingPower int) ast.Expr {
 func (p *SqliteParser) Term() ast.Expr {
 	switch p.Current().Kind {
 	case tik.TokenKind_StringLiteral:
-		return &ast.LiteralString{
+		result := &ast.LiteralString{
 			Token: p.Current(),
 			Value: p.Current().Text,
 		}
+		p.Advance()
+		return result
 	case tik.TokenKind_Identifier:
-		fallthrough
+		result := ast.Identifier(p.Current())
+		p.Advance()
+		return &result
 	default:
 		panic("expression type not handled")
 	}

@@ -416,7 +416,7 @@ func (t Token) InsertionCost() Cost {
 		return CostMid
 	default:
 
-		fmt.Printf("insertion cost not defined for '%s'", t.String())
+		fmt.Fprintf(os.Stderr, "insertion cost not defined for '%s'", t.String())
 		os.Exit(1)
 		return 0
 	}

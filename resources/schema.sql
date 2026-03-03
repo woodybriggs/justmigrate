@@ -1,3 +1,14 @@
+/* table: billing_plan_price */
+CREATE TABLE `billing_plan_price` (
+	`id` text NOT NULL,
+	`currency_code` varchar(4) NOT NULL,
+	`price` integer NOT NULL,
+	`start_date` integer,
+	`end_date` integer,
+    FOREIGN KEY (`id`) REFERENCES `billing_plan`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`currency_code`) REFERENCES `currencies`(`code`) ON UPDATE no action ON DELETE no action
+);
+
 /* table: billing_plan */
 CREATE TABLE `billing_plans` (
 	`id` text PRIMARY KEY NOT NULL,
@@ -5,17 +16,6 @@ CREATE TABLE `billing_plans` (
 	`description` text NOT NULL,
 	`created_at` integer,
     `updated_at` integer
-);
-
-/* table: billing_plan_price */
-CREATE TABLE `billing_plan_price` (
-	`id` text NOT NULL,
-	`currency_code` text NOT NULL,
-	`price` integer NOT NULL,
-	`start_date` integer,
-	`end_date` integer,
-    FOREIGN KEY (`id`) REFERENCES `billing_plan`(`id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`currency_code`) REFERENCES `currencies`(`code`) ON UPDATE no action ON DELETE no action
 );
 
 /* table: currencies */
@@ -43,7 +43,7 @@ CREATE TABLE `exchange_rates` (
 	`source_code` text NOT NULL,
 	`method_code` text NOT NULL,
 	`sourced_at` integer NOT NULL,
-	PRIMARY KEY(`base`, `quote`, `sourced_at`),
+	PRIMARY KEY (`base`, `quote`, `sourced_at`),
 	FOREIGN KEY (`base`) REFERENCES `currencies`(`code`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`quote`) REFERENCES `currencies`(`code`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`source_code`) REFERENCES `exchange_rate_sources`(`code`) ON UPDATE no action ON DELETE no action,

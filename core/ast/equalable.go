@@ -139,11 +139,11 @@ func (node *TableDefinition) Eq(other *TableDefinition) bool {
 	return result
 }
 func (node *ColumnDefinition) Eq(other *ColumnDefinition) bool {
-	if !node.ColumnName.Eq(other.ColumnName.AsExpr()) {
+	if !Check(node.ColumnName.AsExpr(), other.ColumnName.AsExpr()) {
 		return false
 	}
 
-	if !node.TypeName.Eq(&other.TypeName) {
+	if !CheckPtr(node.TypeName, other.TypeName) {
 		return false
 	}
 
@@ -160,7 +160,7 @@ func (node *ColumnDefinition) Eq(other *ColumnDefinition) bool {
 }
 
 func (node *TypeName) Eq(other *TypeName) bool {
-	if !node.TypeName.Eq(other.TypeName.AsExpr()) {
+	if !node.Name.Eq(other.Name.AsExpr()) {
 		return false
 	}
 	return true
@@ -321,7 +321,10 @@ func (node *Cascade) Eq(other ForeignKeyActionDo) bool {
 }
 
 func (node *ConstraintName) Eq(other *ConstraintName) bool {
-	return node.Name.Eq(other.Name.AsExpr())
+	if node == nil || other == nil {
+		return false
+	}
+	return CheckPtr(node.Name.AsExpr(), other.Name.AsExpr())
 }
 
 func (node *ColumnConstraint_PrimaryKey) Eq(other ColumnConstraint) bool {
@@ -371,7 +374,7 @@ func (node *ColumnConstraint_Generated) Eq(otherColumnConstraint ColumnConstrain
 		return false
 	}
 
-	if !Check(node.As, other.As) {
+	if !Check(node.AsExpr, other.AsExpr) {
 		return false
 	}
 
@@ -388,7 +391,7 @@ func (node *ColumnConstraint_Check) Eq(otherColumnConstraint ColumnConstraint) b
 		return false
 	}
 
-	return Check(node.Check, other.Check)
+	return Check(node.CheckExpr, other.CheckExpr)
 }
 
 // @note(woody): fix up ^see above
@@ -402,7 +405,7 @@ func (node *ColumnConstraint_Collate) Eq(other ColumnConstraint) bool {
 			return false
 		}
 
-		result = result && node.Collate.Eq(other.Collate.AsExpr())
+		result = result && node.CollationName.Eq(other.CollationName.AsExpr())
 		return result
 	}
 	return false

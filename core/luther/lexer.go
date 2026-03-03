@@ -62,7 +62,10 @@ func (t *Lexer) Eof() bool {
 }
 
 func (t *Lexer) currentRune() rune {
-	return t.SourceCode.Raw[t.Cur]
+	if t.Cur < len(t.SourceCode.Raw) {
+		return t.SourceCode.Raw[t.Cur]
+	}
+	return '\x00'
 }
 
 func (t Lexer) peekRune() (rune, error) {
@@ -207,31 +210,48 @@ func (t *Lexer) identifier() string {
 
 func (t *Lexer) decimalNumeric() (string, bool) {
 	start := t.Cur
+
 	hasPeriod := false
 	hasExpon := false
 
+	// eat as many digits as we can
 	for !t.Eof() {
-
-		if !hasPeriod && t.currentRune() == '.' {
-			t.eat()
-			hasPeriod = true
-			continue
-		}
-
-		if !hasExpon && t.currentRune() == 'e' {
-			t.eat()
-			hasExpon = true
-			continue
-		}
-
 		if !unicode.IsDigit(t.currentRune()) {
 			break
 		}
-
 		t.eat()
 	}
 
-	if t.currentRune() == 'f' {
+	// check if we have a period
+	if !hasPeriod && t.currentRune() == '.' {
+		t.eat()
+		hasPeriod = true
+	}
+
+	// eat as many digits as we can
+	for !t.Eof() {
+		if !unicode.IsDigit(t.currentRune()) {
+			break
+		}
+		t.eat()
+	}
+
+	// check if we have a period
+	if !hasExpon && (t.currentRune() == 'e' || t.currentRune() == 'E') {
+		t.eat()
+		hasExpon = true
+	}
+
+	// check for signs
+	if t.currentRune() == '+' || t.currentRune() == '-' {
+		t.eat()
+	}
+
+	// eat as many digits as we can
+	for !t.Eof() {
+		if !unicode.IsDigit(t.currentRune()) {
+			break
+		}
 		t.eat()
 	}
 
@@ -314,7 +334,7 @@ func (t *Lexer) NextToken() (token tik.Token) {
 
 	token.SourceRange.Start = t.Cur
 	switch t.currentRune() {
-	case ';', ',', '(', ')', '=', '-', '*', '/':
+	case ';', ',', '(', ')', '=', '+', '-', '*', '/':
 		{
 			r := t.currentRune()
 			t.eat()

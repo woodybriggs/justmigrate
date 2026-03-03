@@ -48,7 +48,7 @@ func (gen *SqliteGenerator) Generate(writer io.Writer) {
 	}
 
 	core := formatter.NewCoreFormatter(os.Stderr, 80, "\"\"")
-	form := &sqliteformatter.SqliteFormatter{Formatter: core}
+	form := &sqliteformatter.SqliteFormatter{Formatter: core, BaseVisitor: ast.BaseVisitor{Debug: true}}
 	form.VisitStatements(statements)
 }
 

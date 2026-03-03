@@ -328,26 +328,38 @@ func MakeWithoutRowId(without Keyword, rowId Keyword) *WithoutRowId {
 
 type ColumnDefinition struct {
 	ColumnName        Identifier
-	TypeName          TypeName
+	TypeName          *TypeName
 	ColumnConstraints []ColumnConstraint
 }
 
 func MakeColumnDefinition(
 	name Identifier,
-	typ Identifier,
+	typ *TypeName,
 	constraints []ColumnConstraint,
 ) *ColumnDefinition {
 	return &ColumnDefinition{
-		ColumnName: name,
-		TypeName: TypeName{
-			TypeName: typ,
-		},
+		ColumnName:        name,
+		TypeName:          typ,
 		ColumnConstraints: constraints,
 	}
 }
 
 type TypeName struct {
-	TypeName Identifier
+	Name Identifier
+	Arg0 NumericLiteral
+	Arg1 NumericLiteral
+}
+
+func MakeTypeName(
+	name Identifier,
+	arg0 NumericLiteral,
+	arg1 NumericLiteral,
+) *TypeName {
+	return &TypeName{
+		Name: name,
+		Arg0: arg0,
+		Arg1: arg1,
+	}
 }
 
 type ConflictClause struct {
@@ -646,32 +658,120 @@ func MakeColumnConstraintPrimaryKey(
 }
 
 type ColumnConstraint_Unique struct {
-	Name *ConstraintName
+	Name          *ConstraintName
+	UniqueKeyword Keyword
+}
+
+func MakeColumnConstraintUnique(
+	constraintName *ConstraintName,
+	uniqueKeyword Keyword,
+) *ColumnConstraint_Unique {
+	return &ColumnConstraint_Unique{
+		Name:          constraintName,
+		UniqueKeyword: uniqueKeyword,
+	}
 }
 
 type ColumnConstraint_Collate struct {
-	Name    *ConstraintName
-	Collate Identifier
+	Name           *ConstraintName
+	CollateKeyword Keyword
+	CollationName  Identifier
+}
+
+func MakeColumnConstraintCollate(
+	constraintName *ConstraintName,
+	collateKeyword Keyword,
+	collationName Identifier,
+) *ColumnConstraint_Collate {
+	return &ColumnConstraint_Collate{
+		Name:           constraintName,
+		CollateKeyword: collateKeyword,
+		CollationName:  collationName,
+	}
 }
 
 type ColumnConstraint_NotNull struct {
-	Name *ConstraintName
+	Name           *ConstraintName
+	NotKeyword     Keyword
+	NullKeyword    Keyword
+	ConflictClause *ConflictClause
+}
+
+func MakeColumnConstraintNotNull(
+	constraintName *ConstraintName,
+	notKeyword Keyword,
+	nullKeyword Keyword,
+	conflictClause *ConflictClause,
+) *ColumnConstraint_NotNull {
+	return &ColumnConstraint_NotNull{
+		Name:           constraintName,
+		NotKeyword:     notKeyword,
+		NullKeyword:    nullKeyword,
+		ConflictClause: conflictClause,
+	}
 }
 
 type ColumnConstraint_Default struct {
-	Name    *ConstraintName
-	Default Expr
+	Name           *ConstraintName
+	DefaultKeyword Keyword
+	Default        Expr
+}
+
+func MakeColumnConstraintDefault(
+	constraintName *ConstraintName,
+	defaultKeyword Keyword,
+	expr Expr,
+) *ColumnConstraint_Default {
+	return &ColumnConstraint_Default{
+		Name:           constraintName,
+		DefaultKeyword: defaultKeyword,
+		Default:        expr,
+	}
 }
 
 type ColumnConstraint_Generated struct {
-	Name    *ConstraintName
-	As      Expr
-	Storage any
+	Name             *ConstraintName
+	GeneratedKeyword *Keyword
+	AlwaysKeyword    *Keyword
+	AsKeyword        Keyword
+	AsExpr           Expr
+	Storage          any
+}
+
+func MakeColumnConstraintGenerated(
+	constraintName *ConstraintName,
+	generatedKeyword *Keyword,
+	alwaysKeyword *Keyword,
+	asKeyword Keyword,
+	asExpr Expr,
+	storage any,
+) *ColumnConstraint_Generated {
+	return &ColumnConstraint_Generated{
+		Name:             constraintName,
+		GeneratedKeyword: generatedKeyword,
+		AlwaysKeyword:    alwaysKeyword,
+		AsKeyword:        asKeyword,
+		AsExpr:           asExpr,
+		Storage:          storage,
+	}
 }
 
 type ColumnConstraint_Check struct {
-	Name  *ConstraintName
-	Check Expr
+	Name         *ConstraintName
+	CheckKeyword Keyword
+	CheckExpr    Expr
+}
+
+func MakeColumnConstraintCheck(
+	constraintName *ConstraintName,
+	checkKeyword Keyword,
+	checkExpr Expr,
+) *ColumnConstraint_Check {
+	return &ColumnConstraint_Check{
+		Name:         constraintName,
+		CheckKeyword: checkKeyword,
+		CheckExpr:    checkExpr,
+	}
 }
 
 type ExprList []Expr
@@ -683,6 +783,11 @@ func TokenToLiteral(token tik.Token) (Expr, error) {
 			return MakeLiteralNull(token), nil
 		}
 	case tik.TokenKind_StringLiteral:
+		{
+			return MakeLiteralString(token, token.Text), nil
+		}
+	// allow literals to become string literals where a literal is needed
+	case tik.TokenKind_Identifier:
 		{
 			return MakeLiteralString(token, token.Text), nil
 		}
