@@ -9,12 +9,12 @@ import (
 	"os"
 
 	"woodybriggs/justmigrate/core/ast"
+	"woodybriggs/justmigrate/core/diff"
 	"woodybriggs/justmigrate/core/luther"
+	"woodybriggs/justmigrate/core/prompt"
 	"woodybriggs/justmigrate/core/report"
 	"woodybriggs/justmigrate/database"
-	sqlitegenerator "woodybriggs/justmigrate/dialects/sqlite/generator"
 	sqliteparser "woodybriggs/justmigrate/dialects/sqlite/parser"
-	"woodybriggs/justmigrate/diff"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -140,13 +140,30 @@ func main() {
 
 	differ := diff.Diff{}
 
-	edits, err := differ.DiffSchema(srcAst, dstAst)
+	_, err = differ.DiffSchema(srcAst, dstAst)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "diff schema failed with err %v", err)
 		os.Exit(1)
 	}
 
-	generate := sqlitegenerator.NewSqliteGenerator(edits)
+	t, err := prompt.NewTerm()
+	t.Start()
+	defer t.Restore()
 
-	generate.Generate(os.Stderr)
+Loop:
+	for {
+		for event := range t.Events() {
+			switch e := event.(type) {
+			case *prompt.KeysPressedEvent:
+				fmt.Fprintf(t, "key pressed %s", string(e.Data))
+				t.Stop()
+				break Loop
+			default:
+				continue
+			}
+		}
+
+		t.SwapBuffers()
+		t.ShowFront()
+	}
 }

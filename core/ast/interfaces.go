@@ -92,6 +92,7 @@ func (node *LiteralNull) nodeExpression()            {}
 
 type NumericLiteral interface {
 	nodeNumericLiteral()
+	Accept(Visitor)
 }
 
 func (node *LiteralFloat) nodeNumericLiteral()           {}

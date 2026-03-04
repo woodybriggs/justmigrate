@@ -1,141 +1,100 @@
-package sqlite
+package formatter
 
 import (
-	"io"
-	"os"
-	"slices"
 	"woodybriggs/justmigrate/core/ast"
-	"woodybriggs/justmigrate/core/tik"
-	sqliteformatter "woodybriggs/justmigrate/dialects/sqlite/formatter"
-	"woodybriggs/justmigrate/diff"
-	"woodybriggs/justmigrate/formatter"
+	"woodybriggs/justmigrate/core/formatter"
 )
 
 type SqliteGenerator struct {
-	edits []diff.Edit
+	formatter.Formatter
+	ast.BaseVisitor
 }
 
-func NewSqliteGenerator(edits []diff.Edit) *SqliteGenerator {
+func NewSqliteFormatter(debug bool) *SqliteGenerator {
 	return &SqliteGenerator{
-		edits: edits,
+		BaseVisitor: ast.BaseVisitor{
+			Debug: debug,
+		},
 	}
 }
 
-func (gen *SqliteGenerator) Generate(writer io.Writer) {
+func (f *SqliteGenerator) VisitStatements(node []ast.Statement) {
+	for _, stmt := range node {
+		stmt.Accept(f)
+		f.Rune(';')
+		f.Break()
+	}
+}
 
-	statements := []ast.Statement{}
+func (f *SqliteGenerator) VisitAlterTable(node *ast.AlterTable) {
+	f.Group(func() {
+		f.Text("ALTER")
+		f.Space()
+		f.Text("TABLE")
+		f.Space()
+		node.TableIdentifier.Accept(f)
+		f.Space()
+		node.Alteration.Accept(f)
+	})
+}
 
-	for _, edit := range gen.edits {
-		switch typ := edit.(type) {
-		case *diff.EditAddTable:
-			{
-				statements = append(statements, typ.CreateTable)
-			}
-		case *diff.EditRemoveTable:
-			{
-				statements = append(statements, dropTable(typ.TableIdentifier))
-			}
-		case *diff.EditModifyTable:
-			{
-				statements = slices.Concat(statements, alterTable(typ.Target, typ.Edits))
-			}
+func (f *SqliteGenerator) VisitTableAlterationAddColumn(node *ast.AddColumn) {
+	f.Text("ADD")
+	f.Space()
+	f.Text("COLUMN")
+	f.Space()
+	node.ColumnDefinition.Accept(f)
+}
 
-		default:
-			{
-				panic("not implemented")
-			}
+func (f *SqliteGenerator) VisitTableAlterationDropColumn(node *ast.DropColumn) {
+	f.Text("DROP")
+	f.Space()
+	f.Text("COLUMN")
+	f.Space()
+	f.Identifier(node.ColumnName.Text)
+}
+
+func (f *SqliteGenerator) VisitColumnDefinition(node *ast.ColumnDefinition) {
+	node.ColumnName.Accept(f)
+	if node.TypeName != nil {
+		f.Space()
+		node.TypeName.Accept(f)
+	}
+	if len(node.ColumnConstraints) > 0 {
+		f.Space()
+	}
+	for i := range len(node.ColumnConstraints) {
+		node.ColumnConstraints[i].Accept(f)
+		if i < len(node.ColumnConstraints)-1 {
+			f.Space()
 		}
 	}
-
-	core := formatter.NewCoreFormatter(os.Stderr, 80, "\"\"")
-	form := &sqliteformatter.SqliteFormatter{Formatter: core, BaseVisitor: ast.BaseVisitor{Debug: true}}
-	form.VisitStatements(statements)
 }
 
-func alterTable(table *ast.CreateTable, edits []diff.Edit) []ast.Statement {
+func (f *SqliteGenerator) VisitCatalogObjectIdentifier(node *ast.CatalogObjectIdentifier) {
+	if node.SchemaName != nil {
+		node.SchemaName.Accept(f)
+		f.Rune('.')
+	}
+	node.ObjectName.Accept(f)
+}
 
-	statements := []ast.Statement{}
+func (f *SqliteGenerator) VisitIdentifier(node *ast.Identifier) {
+	f.Identifier(node.Text)
+}
 
-	for _, edit := range edits {
-		switch typ := edit.(type) {
-		case *diff.EditAddColumn:
-			{
-				statements = append(statements, alterTableAddColumn(table, typ.ColumnDefinition))
-			}
-		case *diff.EditRemoveColumn:
-			{
-				statements = append(statements, alterTableDropColumn(table, typ.ColumnDefinition))
-			}
+func (f *SqliteGenerator) VisitTypeName(node *ast.TypeName) {
+	f.Text(node.Name.Text)
+	if node.Arg0 != nil {
+		f.Rune('(')
+		node.Arg0.Accept(f)
+
+		if node.Arg1 != nil {
+			f.Rune(',')
+			f.Space()
+			node.Arg1.Accept(f)
 		}
-	}
 
-	return statements
-}
-
-func alterTableAddColumn(table *ast.CreateTable, column ast.ColumnDefinition) *ast.AlterTable {
-	return &ast.AlterTable{
-		AlterKeyword: ast.Keyword(
-			tik.Token{
-				Text: "ALTER",
-				Kind: tik.TokenKind_Keyword_ALTER,
-			},
-		),
-		TableKeyword: ast.Keyword(
-			tik.Token{
-				Text: "TABLE",
-				Kind: tik.TokenKind_Keyword_TABLE,
-			},
-		),
-		TableIdentifier: table.TableIdentifier,
-		Alteration: &ast.AddColumn{
-			AddKeyword: ast.Keyword(
-				tik.Token{
-					Text: "ADD",
-					Kind: tik.TokenKind_Keyword_ADD,
-				},
-			),
-			ColumnDefinition: column,
-		},
-	}
-}
-
-func alterTableDropColumn(table *ast.CreateTable, column ast.ColumnDefinition) *ast.AlterTable {
-	return &ast.AlterTable{
-		AlterKeyword: ast.Keyword(
-			tik.Token{
-				Text:           "ALTER",
-				TrailingTrivia: " ",
-				Kind:           tik.TokenKind_Keyword_ALTER,
-			},
-		),
-		TableKeyword: ast.Keyword(
-			tik.Token{
-				Text:           "TABLE",
-				TrailingTrivia: " ",
-				Kind:           tik.TokenKind_Keyword_TABLE,
-			},
-		),
-		TableIdentifier: table.TableIdentifier,
-		Alteration: &ast.DropColumn{
-			DropKeyword: ast.Keyword(tik.Token{
-				Text: "DROP",
-				Kind: tik.TokenKind_Keyword_DROP,
-			}),
-			ColumnName: column.ColumnName,
-		},
-	}
-}
-
-func dropTable(tableIdentifier *ast.CatalogObjectIdentifier) *ast.DropTable {
-	return &ast.DropTable{
-		IfExists: &ast.IfExists{
-			If: ast.Keyword(tik.Token{
-				Text: "IF",
-			}),
-			Exists: ast.Keyword(tik.Token{
-				Text: "EXISTS",
-			}),
-		},
-		TableIdentifier: *tableIdentifier,
+		f.Rune(')')
 	}
 }

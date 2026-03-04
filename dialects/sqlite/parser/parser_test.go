@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 	"woodybriggs/justmigrate/core/ast"
+	"woodybriggs/justmigrate/core/formatter"
 	"woodybriggs/justmigrate/core/luther"
 	"woodybriggs/justmigrate/core/tik"
-	"woodybriggs/justmigrate/formatter"
 )
 
 func makeParser(input string) *SqliteParser {

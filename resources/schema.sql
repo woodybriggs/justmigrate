@@ -1,5 +1,5 @@
 /* table: billing_plan_price */
-CREATE TABLE `billing_plan_price` (
+CREATE TABLE `billing_plan_prices` (
 	`id` text NOT NULL,
 	`currency_code` varchar(4) NOT NULL,
 	`price` integer NOT NULL,
