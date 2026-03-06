@@ -77,7 +77,7 @@ func TestANSIIEscapeSequenceTokenizer(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 	reader := bufio.NewReader(buf)
-	tokenizer := ANSIIEscapeSequenceTokenizer{Reader: reader}
+	tokenizer := ANSIIEscapeSequenceTokenizer{reader: reader}
 
 	handler := handler{}
 

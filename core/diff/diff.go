@@ -3,9 +3,9 @@ package diff
 import (
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"woodybriggs/justmigrate/core/ast"
+	"woodybriggs/justmigrate/core/prompt"
 )
 
 type Diff struct{}
@@ -23,23 +23,133 @@ func isSameCreateTable(a, b *ast.CreateTable) bool {
 	return a.TableIdentifier.Eq(b.TableIdentifier)
 }
 
+func resolveMissingColumns(
+	table *ast.CatalogObjectIdentifier,
+	removed []ast.ColumnDefinition,
+	added []ast.ColumnDefinition,
+) (finalRemoved []ast.ColumnDefinition, finalAdded []ast.ColumnDefinition, ops []Op) {
+	if len(removed) == 0 {
+		return removed, added, nil
+	}
+
+	unresolvedRemovedCols := removed
+	terminal := prompt.Terminal{}
+	terminal.Start()
+	defer terminal.Restore()
+
+	for _, newCol := range added {
+
+		// if we have resolved all the "removed" columns,
+		// then it can be assumed that any column that
+		// hasn't been marked as renamed is definatly a new column
+		if len(unresolvedRemovedCols) == 0 {
+			finalAdded = append(finalAdded, newCol)
+			continue
+		}
+
+		options := []prompt.SelectOption{
+			{
+				Label: fmt.Sprintf("new column: %s", newCol.ColumnName.Text),
+				Value: &NewColOp{Table: table, Col: &newCol},
+			},
+		}
+
+		for _, unresolvedCol := range unresolvedRemovedCols {
+			options = append(options, prompt.SelectOption{
+				Label: fmt.Sprintf("renamed from: %s", unresolvedCol.ColumnName.Text),
+				Value: &RenameColOp{Table: table, FromCol: &unresolvedCol.ColumnName, ToCol: &newCol.ColumnName},
+			})
+		}
+
+		sel := prompt.Select{}
+		title := fmt.Sprintf("Resolve table %s: Is this column new or renamed?", newCol.ColumnName.Text)
+		choiceIndex, err := sel.Do(&terminal, title, options)
+		if err != nil {
+			panic(err)
+		}
+		op := options[choiceIndex]
+		switch typ := op.Value.(type) {
+		case *RenameColOp:
+			// remove the From column from the unresolved columns as it is now resolved
+			unresolvedRemovedCols = slices.DeleteFunc(unresolvedRemovedCols, func(col ast.ColumnDefinition) bool {
+				return col.ColumnName.Eq(typ.FromCol)
+			})
+
+			// add the rename op to the output
+			ops = append(ops, typ)
+		case *NewColOp:
+			// add the new column to final added
+			finalAdded = append(finalAdded, *typ.Col)
+		}
+	}
+	// any unresolved removed columns are now final as removed
+	finalRemoved = unresolvedRemovedCols
+	return
+}
+
 func resolveMissingTables(
 	removed []*ast.CreateTable,
 	added []*ast.CreateTable,
 ) (finalRemoved []*ast.CreateTable, finalAdded []*ast.CreateTable, ops []Op) {
 
+	if len(removed) == 0 {
+		return removed, added, nil
+	}
+
 	unresolvedRemovedTables := removed
+	terminal := prompt.Terminal{}
+	terminal.Start()
+	defer terminal.Restore()
 
 	for _, newTable := range added {
-		fmt.Fprintf(os.Stderr, "New table detected %s\r\n", newTable.TableIdentifier.ObjectName.Text)
 
-		fmt.Fprintf(os.Stderr, "this is a new table\r\n")
+		// if we have resolved all the "removed" columns,
+		// then it can be assumed that any column that
+		// hasn't been marked as renamed is definatly a new column
+		if len(unresolvedRemovedTables) == 0 {
+			finalAdded = append(finalAdded, newTable)
+			continue
+		}
+
+		options := []prompt.SelectOption{
+			{
+				Label: fmt.Sprintf("new table: %s", newTable.TableIdentifier.ObjectName.Text),
+				Value: &NewTableOp{newTable},
+			},
+		}
+
 		for _, unresolved := range unresolvedRemovedTables {
-			fmt.Fprintf(os.Stderr, "renamed from %s\r\n", unresolved.TableIdentifier.ObjectName.Text)
+			options = append(options, prompt.SelectOption{
+				Label: fmt.Sprintf("renamed from:  %s", unresolved.TableIdentifier.ObjectName.Text),
+				Value: &RenameTableOp{From: unresolved.TableIdentifier, To: newTable.TableIdentifier},
+			})
+		}
+
+		sel := prompt.Select{}
+		title := fmt.Sprintf("Resolve table %s: Is this table new or renamed?", newTable.TableIdentifier.ObjectName.Text)
+		choiceIndex, err := sel.Do(&terminal, title, options)
+		if err != nil {
+			panic(err)
+		}
+		op := options[choiceIndex]
+		switch typ := op.Value.(type) {
+		case *RenameTableOp:
+			// remove the From table from the unresolved table as it is now resolved
+			unresolvedRemovedTables = slices.DeleteFunc(unresolvedRemovedTables, func(table *ast.CreateTable) bool {
+				return table.TableIdentifier.Eq(typ.From)
+			})
+
+			// add the rename op to the output
+			ops = append(ops, typ)
+		case *NewTableOp:
+			// add the new table to final added
+			finalAdded = append(finalAdded, typ.CreateTable)
 		}
 	}
 
-	return removed, finalAdded, ops
+	// any unresolved removed tables are now final as removed
+	finalRemoved = unresolvedRemovedTables
+	return
 }
 
 func (diff *Diff) DiffSchema(src, tgt []ast.Statement) ([]Op, error) {
@@ -107,8 +217,10 @@ func (diff *Diff) DiffCreateTable(src, tgt *ast.CreateTable) []Op {
 		a := src.TableDefinition.ColumnDefinitions
 		b := tgt.TableDefinition.ColumnDefinitions
 
-		removedColumns, addedColumns := symmetricDifference(a, b, isSameColumnDefinition)
+		maybeRemovedColumns, maybeAddedColumns := symmetricDifference(a, b, isSameColumnDefinition)
 		maybeModifiedColumns := intersection(a, b, isSameColumnDefinition)
+
+		removedColumns, addedColumns, renamedColumnsOps := resolveMissingColumns(src.TableIdentifier, maybeRemovedColumns, maybeAddedColumns)
 
 		for _, removedColumn := range removedColumns {
 			ops = append(ops, &DelColOp{Table: src.TableIdentifier, Col: &removedColumn.ColumnName})
@@ -117,6 +229,8 @@ func (diff *Diff) DiffCreateTable(src, tgt *ast.CreateTable) []Op {
 		for _, addedColumn := range addedColumns {
 			ops = append(ops, &NewColOp{Table: src.TableIdentifier, Col: &addedColumn})
 		}
+
+		ops = append(ops, renamedColumnsOps...)
 
 		for _, pair := range maybeModifiedColumns {
 			columnOps := diff.DiffColumnDefinition(src.TableIdentifier, pair.A, pair.B)

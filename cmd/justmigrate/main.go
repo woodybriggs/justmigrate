@@ -11,7 +11,6 @@ import (
 	"woodybriggs/justmigrate/core/ast"
 	"woodybriggs/justmigrate/core/diff"
 	"woodybriggs/justmigrate/core/luther"
-	"woodybriggs/justmigrate/core/prompt"
 	"woodybriggs/justmigrate/core/report"
 	"woodybriggs/justmigrate/database"
 	sqliteparser "woodybriggs/justmigrate/dialects/sqlite/parser"
@@ -140,32 +139,13 @@ func main() {
 
 	differ := diff.Diff{}
 
-	_, err = differ.DiffSchema(srcAst, dstAst)
+	ops, err := differ.DiffSchema(srcAst, dstAst)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "diff schema failed with err %v", err)
 		os.Exit(1)
 	}
 
-	t := prompt.Terminal{}
-	err = t.Start()
-	defer t.Restore()
-	if err != nil {
-		panic(err)
+	for _, op := range ops {
+		fmt.Printf("%T, %+v\n", op, op)
 	}
-
-	sel := prompt.Select{}
-	options := []prompt.SelectOption{
-		{Label: "Hello", Value: struct{}{}},
-		{Label: "My", Value: struct{}{}},
-		{Label: "Name", Value: struct{}{}},
-		{Label: "Is", Value: struct{}{}},
-		{Label: "Woody", Value: struct{}{}},
-	}
-	choiceIndex, err := sel.Do(&t, "hello", options)
-	t.Restore()
-	if err != nil {
-		return
-	}
-	choice := options[choiceIndex]
-	fmt.Println(choice)
 }

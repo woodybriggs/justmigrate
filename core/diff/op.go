@@ -11,6 +11,7 @@ func (*DelTableOp) op()      {}
 func (*RenameTableOp) op()   {}
 func (*NewColOp) op()        {}
 func (*DelColOp) op()        {}
+func (*RenameColOp) op()     {}
 func (*ChangeColTypeOp) op() {}
 
 type NewTableOp struct {

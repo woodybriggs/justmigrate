@@ -22,116 +22,18 @@ type TerminalHandler interface {
 type Terminal struct {
 	prevState *term.State
 	tokenizer ANSIIEscapeSequenceTokenizer
-}
-
-var ErrInvalidSelection = errors.New("Invalid Selection")
-
-type SelectOption struct {
-	Label string
-	Value interface{}
-}
-
-type Select struct {
-	hovered    int
-	selected   int
-	shouldExit bool
-	options    []SelectOption
-}
-
-func (s *Select) Do(terminal *Terminal, title string, options []SelectOption) (choice int, err error) {
-	s.options = options
-	s.shouldExit = false
-	s.hovered = 0
-	s.selected = -1
-
-	for !s.shouldExit {
-		terminal.Sequence(CUP, nil)
-		terminal.Sequence(ED, []int{0})
-		terminal.LineOfText(title)
-		terminal.ItalicStyle()
-		terminal.LineOfText("use arrow keys to navigate, space to select and enter to confirm selection")
-		terminal.EndStyles()
-		for i, option := range options {
-			if i == s.hovered {
-				terminal.Rune(0x25BA)
-			} else {
-				terminal.Rune(' ')
-			}
-			if i == s.selected {
-				terminal.Rune(0x25CF)
-			} else {
-				terminal.Rune(0x25CB)
-			}
-			if i == s.selected {
-				terminal.BoldStyle()
-				terminal.LineOfText(option.Label)
-				terminal.EndStyles()
-			} else {
-				terminal.LineOfText(option.Label)
-			}
-		}
-
-		err = terminal.NextEvent(s)
-		if err != nil {
-			s.shouldExit = true
-		}
-	}
-	return s.selected, err
-}
-
-func (s *Select) OnKey(c rune) error {
-	switch c {
-	case ' ':
-		if s.selected == s.hovered {
-			s.selected = -1
-		} else {
-			s.selected = s.hovered
-		}
-	}
-	return nil
-}
-
-func (s *Select) OnControl(ctl ANSIIControlCharacter) error {
-	switch ctl {
-	case EXT:
-		s.shouldExit = true
-		return ErrInvalidSelection
-	case LF, CR:
-		if s.selected > -1 {
-			s.shouldExit = true
-		}
-	}
-	return nil
-}
-
-func (s *Select) OnCSI(cmd ANSIISequenceCommand, params []int) error {
-
-	if len(params) == 0 {
-		params = append(params, 1)
-	} else if params[0] == 0 {
-		params[0] = 1
-	}
-
-	switch cmd {
-	case ANSIISequenceCommand(EXT):
-		s.shouldExit = true
-	case CUD:
-		s.hovered = (s.hovered + int(params[0])) % len(s.options)
-	case CUU:
-		s.hovered = (s.hovered - int(params[0]) + len(s.options)) % len(s.options)
-	}
-	return nil
+	writer    *bufio.Writer
 }
 
 func (t *Terminal) Sequence(cmd ANSIISequenceCommand, params []int) {
-	fmt.Fprintf(os.Stdout, "%c[", byte(ESC))
+	fmt.Fprintf(t.writer, "%c[", byte(ESC))
 	for i, param := range params {
-		fmt.Fprintf(os.Stdout, "%s", strconv.FormatInt(int64(param), 10))
+		fmt.Fprintf(t.writer, "%s", strconv.FormatInt(int64(param), 10))
 		if i < len(params)-1 {
-			fmt.Fprint(os.Stdout, ";")
+			fmt.Fprint(t.writer, ";")
 		}
 	}
-	fmt.Fprintf(os.Stdout, "%c", byte(cmd))
+	fmt.Fprintf(t.writer, "%c", byte(cmd))
 }
 
 func (t *Terminal) ItalicStyle() {
@@ -147,17 +49,21 @@ func (t *Terminal) EndStyles() {
 }
 
 func (t *Terminal) Control(ctl ANSIIControlCharacter) {
-	fmt.Fprintf(os.Stdout, "%c", byte(ctl))
+	fmt.Fprintf(t.writer, "%c", byte(ctl))
 }
 
 func (t *Terminal) Rune(r rune) {
-	fmt.Fprintf(os.Stdout, "%c", r)
+	fmt.Fprintf(t.writer, "%c", r)
 }
 
 func (t *Terminal) LineOfText(l string) {
-	fmt.Fprintf(os.Stdout, "%s", l)
+	fmt.Fprintf(t.writer, "%s", l)
 	t.Control(CR)
 	t.Control(LF)
+}
+
+func (t *Terminal) Flush() error {
+	return t.writer.Flush()
 }
 
 func (t *Terminal) Start() error {
@@ -169,7 +75,9 @@ func (t *Terminal) Start() error {
 	t.prevState = oldState
 
 	reader := bufio.NewReader(os.Stdin)
-	t.tokenizer = ANSIIEscapeSequenceTokenizer{Reader: reader}
+	writer := bufio.NewWriter(os.Stdout)
+	t.tokenizer = ANSIIEscapeSequenceTokenizer{reader: reader}
+	t.writer = writer
 
 	return nil
 }
@@ -179,7 +87,7 @@ func (t *Terminal) Restore() {
 }
 
 func (t *Terminal) NextEvent(handler TerminalHandler) error {
-	if t.tokenizer.Reader == nil {
+	if t.tokenizer.reader == nil {
 		return ErrFailedToStart
 	}
 	return t.tokenizer.NextEvent(handler)
@@ -224,13 +132,13 @@ const (
 )
 
 type ANSIIEscapeSequenceTokenizer struct {
-	*bufio.Reader
+	reader     *bufio.Reader
 	paramBuf   [8]int
 	paramCount int
 }
 
 func (t *ANSIIEscapeSequenceTokenizer) NextEvent(handler TerminalHandler) error {
-	r, _, err := t.ReadRune()
+	r, _, err := t.reader.ReadRune()
 	if err != nil {
 		return err
 	}
@@ -254,7 +162,7 @@ func (t *ANSIIEscapeSequenceTokenizer) NextEvent(handler TerminalHandler) error 
 }
 
 func (t *ANSIIEscapeSequenceTokenizer) ansiiEscapeSequence() (ANSIISequenceCommand, []int, error) {
-	n, err := t.ReadByte()
+	n, err := t.reader.ReadByte()
 	if err != nil {
 		return NOP, nil, err
 	}
@@ -285,7 +193,7 @@ func (t *ANSIIEscapeSequenceTokenizer) csiSequence() (ANSIISequenceCommand, []in
 
 	for !errors.Is(err, io.EOF) {
 
-		n, err = t.ReadByte()
+		n, err = t.reader.ReadByte()
 
 		if isDigit(n) {
 			var number int = 0
@@ -319,7 +227,7 @@ func (t *ANSIIEscapeSequenceTokenizer) numberParameter(first byte) (int, byte, e
 	var err error
 
 	for {
-		n, err = t.ReadByte()
+		n, err = t.reader.ReadByte()
 		if err != nil || !isDigit(n) {
 			break
 		}

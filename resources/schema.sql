@@ -1,5 +1,5 @@
 /* table: billing_plan_price */
-CREATE TABLE `billing_plan_prices` (
+CREATE TABLE `billing_plan_price` (
 	`id` text NOT NULL,
 	`currency_code` varchar(4) NOT NULL,
 	`price` integer NOT NULL,
@@ -15,7 +15,8 @@ CREATE TABLE `billing_plans` (
 	`name` text NOT NULL,
 	`description` text NOT NULL,
 	`created_at` integer,
-    `updated_at` integer
+    `updated_at` integer,
+    `duration` integer
 );
 
 /* table: currencies */
