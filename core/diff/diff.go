@@ -3,6 +3,7 @@ package diff
 import (
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"woodybriggs/justmigrate/core/ast"
 )
@@ -30,11 +31,11 @@ func resolveMissingTables(
 	unresolvedRemovedTables := removed
 
 	for _, newTable := range added {
-		fmt.Printf("New table detected %s\n", newTable.TableIdentifier.ObjectName.Text)
+		fmt.Fprintf(os.Stderr, "New table detected %s\r\n", newTable.TableIdentifier.ObjectName.Text)
 
-		fmt.Println("this is a new table")
+		fmt.Fprintf(os.Stderr, "this is a new table\r\n")
 		for _, unresolved := range unresolvedRemovedTables {
-			fmt.Printf("renamed from %s\n", unresolved.TableIdentifier.ObjectName.Text)
+			fmt.Fprintf(os.Stderr, "renamed from %s\r\n", unresolved.TableIdentifier.ObjectName.Text)
 		}
 	}
 

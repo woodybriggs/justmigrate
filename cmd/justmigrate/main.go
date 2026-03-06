@@ -146,24 +146,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	t, err := prompt.NewTerm()
-	t.Start()
+	t := prompt.Terminal{}
+	err = t.Start()
 	defer t.Restore()
-
-Loop:
-	for {
-		for event := range t.Events() {
-			switch e := event.(type) {
-			case *prompt.KeysPressedEvent:
-				fmt.Fprintf(t, "key pressed %s", string(e.Data))
-				t.Stop()
-				break Loop
-			default:
-				continue
-			}
-		}
-
-		t.SwapBuffers()
-		t.ShowFront()
+	if err != nil {
+		panic(err)
 	}
+
+	sel := prompt.Select{}
+	options := []prompt.SelectOption{
+		{Label: "Hello", Value: struct{}{}},
+		{Label: "My", Value: struct{}{}},
+		{Label: "Name", Value: struct{}{}},
+		{Label: "Is", Value: struct{}{}},
+		{Label: "Woody", Value: struct{}{}},
+	}
+	choiceIndex, err := sel.Do(&t, "hello", options)
+	t.Restore()
+	if err != nil {
+		return
+	}
+	choice := options[choiceIndex]
+	fmt.Println(choice)
 }
