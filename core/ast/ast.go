@@ -657,6 +657,21 @@ func MakeColumnConstraintPrimaryKey(
 	}
 }
 
+type ColumnConstraint_ForeignKey struct {
+	Name     *ConstraintName
+	FkClause ForeignKeyClause
+}
+
+func MakeColumnConstraintForeignKey(
+	constraintName *ConstraintName,
+	fkClause ForeignKeyClause,
+) *ColumnConstraint_ForeignKey {
+	return &ColumnConstraint_ForeignKey{
+		Name:     constraintName,
+		FkClause: fkClause,
+	}
+}
+
 type ColumnConstraint_Unique struct {
 	Name          *ConstraintName
 	UniqueKeyword Keyword

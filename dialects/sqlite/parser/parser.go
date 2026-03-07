@@ -630,6 +630,8 @@ func (p *SqliteParser) ColumnConstraint() ast.ColumnConstraint {
 	switch p.Current().Kind {
 	case tik.TokenKind_Keyword_PRIMARY:
 		return p.ColumnConstraint_PrimaryKey(constraintName)
+	case tik.TokenKind_Keyword_REFERENCES:
+		return p.ColumnConstraint_ForeignKey(constraintName)
 	case tik.TokenKind_Keyword_NOT:
 		return p.ColumnConstraint_NotNull(constraintName)
 	case tik.TokenKind_Keyword_DEFAULT:
@@ -660,6 +662,15 @@ func (p *SqliteParser) ColumnConstraint() ast.ColumnConstraint {
 			return nil
 		}
 	}
+}
+
+func (p *SqliteParser) ColumnConstraint_ForeignKey(constraintName *ast.ConstraintName) *ast.ColumnConstraint_ForeignKey {
+	clause := p.ForeignKeyClause()
+
+	return ast.MakeColumnConstraintForeignKey(
+		constraintName,
+		*clause,
+	)
 }
 
 func (p *SqliteParser) ColumnConstraint_PrimaryKey(constraintName *ast.ConstraintName) *ast.ColumnConstraint_PrimaryKey {

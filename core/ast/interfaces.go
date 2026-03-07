@@ -43,6 +43,7 @@ type ColumnConstraint interface {
 }
 
 func (node *ColumnConstraint_PrimaryKey) nodeColumnConstraint() {}
+func (node *ColumnConstraint_ForeignKey) nodeColumnConstraint() {}
 func (node *ColumnConstraint_Default) nodeColumnConstraint()    {}
 func (node *ColumnConstraint_NotNull) nodeColumnConstraint()    {}
 func (node *ColumnConstraint_Generated) nodeColumnConstraint()  {}

@@ -25,14 +25,16 @@ type Report struct {
 	Notes   []string
 }
 
-// LineInfo helps map offsets to displayable coordinates
+func (r *Report) Error() string {
+	renderer := Renderer{}
+	return renderer.Render(*r)
+}
+
 type LineInfo struct {
 	LineNum int
 	Content string
 	Col     int
 }
-
-// --- Renderer Logic ---
 
 type Renderer struct {
 	gutterWidth int
@@ -41,34 +43,35 @@ type Renderer struct {
 func (r *Renderer) Render(report Report) string {
 	var sb strings.Builder
 
-	// 1. Header
+	// header
 	fmt.Fprintf(&sb, "%s[%04d]: %s\n", report.Kind, report.Code, report.Message)
 
+	// labels
 	for i, label := range report.Labels {
 		lines := r.getLinesInRange(label.Source, label.Range)
 		if len(lines) == 0 {
 			continue
 		}
 
-		// Calculate gutter based on the highest line number in this snippet
+		// calculate gutter based on the highest line number in this snippet
 		maxLine := lines[len(lines)-1].LineNum
 		r.gutterWidth = len(fmt.Sprintf("%d", maxLine)) + 1
 
-		// 2. Snippet Header
+		// snippet Header
 		fmt.Fprintf(&sb, "%s ┌─ %s:%d:%d\n", r.pad(""), label.Source.FileName, lines[0].LineNum, lines[0].Col)
 		fmt.Fprintf(&sb, "%s │\n", r.pad(""))
 
-		// 3. Source Lines
+		// source Lines
 		for _, li := range lines {
 			fmt.Fprintf(&sb, "%s │ %s\n", r.pad(fmt.Sprint(li.LineNum)), li.Content)
 		}
 
-		// 4. Pointer / Underline (Simplified for single-line or start-of-range focus)
-		// For a full implementation like the diagram, one would track vertical connectors here.
+		// arrows / underline
+		// one would track vertical connectors here.
 		firstLine := lines[0]
 		pointer := r.pad("") + " │ " + strings.Repeat(" ", firstLine.Col) + "^"
 
-		// If it's a short range on one line, add more carets
+		// if it's a short range on one line, add more carets
 		if len(lines) == 1 && label.Range.End-label.Range.Start > 1 {
 			pointer += strings.Repeat("^", (label.Range.End-label.Range.Start)-1)
 		}
@@ -83,7 +86,7 @@ func (r *Renderer) Render(report Report) string {
 		}
 	}
 
-	// 5. Global Notes
+	// global notes
 	if len(report.Notes) > 0 {
 		fmt.Fprintf(&sb, "%s │\n", r.pad(""))
 		for _, note := range report.Notes {
@@ -105,13 +108,11 @@ func (r *Renderer) getLinesInRange(src luther.SourceCode, tr tik.TextRange) []Li
 	currentLine := 1
 	lineStartOffset := 0
 
-	// Identify all lines in the file
 	lines := strings.Split(string(src.Raw), "\n")
 
 	for _, content := range lines {
 		lineEndOffset := lineStartOffset + len([]rune(content))
 
-		// Check if this line intersects with our TextRange
 		if lineEndOffset >= tr.Start && lineStartOffset <= tr.End {
 			col := 0
 			if tr.Start > lineStartOffset {

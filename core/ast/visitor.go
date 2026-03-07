@@ -23,6 +23,7 @@ type Visitor interface {
 	VisitTableConstraintForeignKey(*TableConstraint_ForeignKey)
 
 	VisitColumnConstraintPrimaryKey(*ColumnConstraint_PrimaryKey)
+	VisitColumnConstraintForeignKey(*ColumnConstraint_ForeignKey)
 	VisitColumnConstraintDefault(*ColumnConstraint_Default)
 	VisitColumnConstraintCheck(*ColumnConstraint_Check)
 	VisitColumnConstraintUnique(*ColumnConstraint_Unique)
@@ -214,7 +215,9 @@ func (node *SetNull) Accept(v Visitor) {
 	v.VisitForeignKeyActionSetNull(node)
 }
 
-// func (node *ColumnConstraint_ForeignKey) Accept(v Visitor)
+func (node *ColumnConstraint_ForeignKey) Accept(v Visitor) {
+	v.VisitColumnConstraintForeignKey(node)
+}
 
 type BaseVisitor struct {
 	Debug bool
@@ -305,6 +308,11 @@ func (v *BaseVisitor) VisitTableConstraintForeignKey(*TableConstraint_ForeignKey
 func (v *BaseVisitor) VisitColumnConstraintPrimaryKey(*ColumnConstraint_PrimaryKey) {
 	if v.Debug {
 		fmt.Fprintf(os.Stderr, "VisitColumnConstraintPrimaryKey\n")
+	}
+}
+func (v *BaseVisitor) VisitColumnConstraintForeignKey(*ColumnConstraint_ForeignKey) {
+	if v.Debug {
+		fmt.Fprintf(os.Stderr, "VisitColumnConstraintForeignKey\n")
 	}
 }
 func (v *BaseVisitor) VisitColumnConstraintDefault(*ColumnConstraint_Default) {

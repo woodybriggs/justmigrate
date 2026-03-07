@@ -1,6 +1,9 @@
 package ast
 
-import "slices"
+import (
+	"maps"
+	"slices"
+)
 
 type Equalable[T any] interface {
 	Eq(other T) bool
@@ -342,6 +345,71 @@ func (node *ColumnConstraint_PrimaryKey) Eq(other ColumnConstraint) bool {
 	return false
 }
 
+type IdentifierSet map[string]struct{}
+
+func (this IdentifierSet) Eq(other IdentifierSet) bool {
+
+	if len(this) != len(other) {
+		return false
+	}
+
+	for thisKey := range maps.Keys(this) {
+		if _, hasKey := other[thisKey]; !hasKey {
+			return false
+		}
+	}
+
+	return true
+}
+
+type IdentifierList []Identifier
+
+func (l IdentifierList) ToSet() (result IdentifierSet) {
+	result = IdentifierSet{}
+	for _, str := range l {
+		result[str.Text] = struct{}{}
+	}
+	return result
+}
+
+func (node *ColumnConstraint_ForeignKey) Eq(otherConstraint ColumnConstraint) bool {
+	other, ok := otherConstraint.(*ColumnConstraint_ForeignKey)
+	if !ok {
+		return false
+	}
+
+	if !CheckPtr(node.Name, other.Name) {
+		return false
+	}
+
+	if !Check(&node.FkClause.ForeignTable, &other.FkClause.ForeignTable) {
+		return false
+	}
+
+	if !Check(
+		IdentifierList(node.FkClause.ForeignColumns).ToSet(),
+		IdentifierList(other.FkClause.ForeignColumns).ToSet(),
+	) {
+		return false
+	}
+
+	if !CheckPtr(
+		node.FkClause.MatchName.AsExpr(),
+		other.FkClause.MatchName.AsExpr(),
+	) {
+		return false
+	}
+
+	if !CheckPtr(
+		node.FkClause.Deferrable,
+		other.FkClause.Deferrable,
+	) {
+		return false
+	}
+
+	return true
+}
+
 func (node *ColumnConstraint_NotNull) Eq(otherColumnConstraint ColumnConstraint) bool {
 	other, ok := otherColumnConstraint.(*ColumnConstraint_NotNull)
 	if !ok {
@@ -598,4 +666,18 @@ func (node *ForeignKeyUpdateAction) Eq(otherFkAction ForeignKeyAction) bool {
 	}
 
 	return Check(node.Action, other.Action)
+}
+
+func (node *ForeignKeyDeferrable) Eq(other *ForeignKeyDeferrable) bool {
+	if !CheckPtr(node.NotKeyword, other.NotKeyword) {
+		return false
+	}
+	if !CheckPtr(node.InitiallyKeyword, other.InitiallyKeyword) {
+		return false
+	}
+
+	if !CheckPtr(node.Deferrable, other.Deferrable) {
+		return false
+	}
+	return true
 }

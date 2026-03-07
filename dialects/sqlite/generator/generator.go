@@ -1,4 +1,4 @@
-package formatter
+package generator
 
 import (
 	"woodybriggs/justmigrate/core/ast"

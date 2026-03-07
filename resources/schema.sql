@@ -15,8 +15,7 @@ CREATE TABLE `billing_plans` (
 	`name` text NOT NULL,
 	`description` text NOT NULL,
 	`created_at` integer,
-    `updated_at` integer,
-    `duration` integer
+    `updated_at` integer
 );
 
 /* table: currencies */
