@@ -13,6 +13,7 @@ import (
 	"woodybriggs/justmigrate/core/luther"
 	"woodybriggs/justmigrate/core/report"
 	"woodybriggs/justmigrate/database"
+	sqlitegen "woodybriggs/justmigrate/dialects/sqlite/generator"
 	sqliteparser "woodybriggs/justmigrate/dialects/sqlite/parser"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -143,6 +144,26 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "diff schema failed with err %v", err)
 		os.Exit(1)
+	}
+
+	gen := sqlitegen.SqliteGenerator{}
+
+	ops, err = gen.Plan(dstAst, ops)
+
+	type multiError interface {
+		Unwrap() []error
+	}
+	if err != nil {
+		if errs, ok := errors.AsType[*sqlitegen.MissingColumnsErr](err); ok {
+			for _, err := range errs.Unwrap() {
+				fmt.Println(err)
+			}
+		}
+		if errs, ok := errors.AsType[*sqlitegen.ErrSchemaResolutionFailed](err); ok {
+			for _, err := range errs.Unwrap() {
+				fmt.Println(err)
+			}
+		}
 	}
 
 	for _, op := range ops {

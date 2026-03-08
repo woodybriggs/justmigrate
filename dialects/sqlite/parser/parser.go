@@ -73,6 +73,7 @@ func (p *SqliteParser) TableConstraint() ast.TableConstraint {
 	if constraintName == nil {
 		p.ReportWarning(
 			report.NewReport("warning").
+				WithLocation(p.Current().FileLoc).
 				WithMessage("unnamed table constraint").
 				WithLabels([]report.Label{
 					{
@@ -97,6 +98,7 @@ func (p *SqliteParser) TableConstraint() ast.TableConstraint {
 	default:
 		err := report.
 			NewReport("parse error").
+			WithLocation(p.Current().FileLoc).
 			WithLabels([]report.Label{
 				{
 					Source: p.Current().SourceCode,
@@ -299,6 +301,7 @@ func (p *SqliteParser) ForeignKeyAction() ast.ForeignKeyAction {
 	default:
 		p.ReportError(
 			report.NewReport("parse error").
+				WithLocation(p.Current().FileLoc).
 				WithLabels([]report.Label{
 					{
 						Source: p.Current().SourceCode,
@@ -324,6 +327,7 @@ func (p *SqliteParser) ForeignKeyActionDo() ast.ForeignKeyActionDo {
 		} else {
 			p.ReportError(
 				report.NewReport("parse error").
+					WithLocation(p.Current().FileLoc).
 					WithLabels([]report.Label{
 						{
 							Source: p.Current().SourceCode,
@@ -348,6 +352,7 @@ func (p *SqliteParser) ForeignKeyActionDo() ast.ForeignKeyActionDo {
 	} else {
 		p.ReportError(
 			report.NewReport("parse error").
+				WithLocation(p.Current().FileLoc).
 				WithLabels([]report.Label{
 					{
 						Source: p.Current().SourceCode,
@@ -387,6 +392,7 @@ func (p *SqliteParser) ForeignKeyDeferrable() *ast.ForeignKeyDeferrable {
 			p.ReportError(
 				report.
 					NewReport("parse errors").
+					WithLocation(p.Current().FileLoc).
 					WithLabels([]report.Label{
 						{
 							Source: p.Current().SourceCode,
@@ -513,11 +519,14 @@ func (p *SqliteParser) LiteralNumericLiteral(negate *tik.Token) ast.NumericLiter
 		p.Advance()
 		val, err := strconv.ParseInt(token.Text, 10, 64)
 		if err != nil {
-			rep := report.NewReport("parse error").WithMessage(err.Error()).WithLabels([]report.Label{{
-				Source: token.SourceCode,
-				Range:  token.SourceRange,
-				Note:   "here",
-			}})
+			rep := report.NewReport("parse error").
+				WithLocation(p.Current().FileLoc).
+				WithMessage(err.Error()).
+				WithLabels([]report.Label{{
+					Source: token.SourceCode,
+					Range:  token.SourceRange,
+					Note:   "here",
+				}})
 			p.Parser.ReportError(rep)
 			return ast.MakeLiteralSignedInteger(token, 0)
 		}
@@ -529,11 +538,14 @@ func (p *SqliteParser) LiteralNumericLiteral(negate *tik.Token) ast.NumericLiter
 		p.Advance()
 		val, err := strconv.ParseFloat(token.Text, 64)
 		if err != nil {
-			rep := report.NewReport("parse error").WithMessage(err.Error()).WithLabels([]report.Label{{
-				Source: token.SourceCode,
-				Range:  token.SourceRange,
-				Note:   "here",
-			}})
+			rep := report.NewReport("parse error").
+				WithLocation(p.Current().FileLoc).
+				WithMessage(err.Error()).
+				WithLabels([]report.Label{{
+					Source: token.SourceCode,
+					Range:  token.SourceRange,
+					Note:   "here",
+				}})
 			p.Parser.ReportError(rep)
 			return ast.MakeLiteralFloat(token, 0)
 		}
@@ -543,6 +555,7 @@ func (p *SqliteParser) LiteralNumericLiteral(negate *tik.Token) ast.NumericLiter
 		return ast.MakeLiteralFloat(token, val)
 	default:
 		rep := report.NewReport("parse error").
+			WithLocation(p.Current().FileLoc).
 			WithMessage("expected numeric literal (signed integer or float)").
 			WithLabels([]report.Label{
 				{
@@ -651,6 +664,7 @@ func (p *SqliteParser) ColumnConstraint() ast.ColumnConstraint {
 			p.ReportError(
 				report.
 					NewReport("parse error").
+					WithLocation(p.Current().FileLoc).
 					WithLabels([]report.Label{
 						{
 							Source: p.Current().SourceCode,
@@ -732,6 +746,7 @@ func (p *SqliteParser) ColumnConstraint_Default(constraintName *ast.ConstraintNa
 	lit, err := ast.TokenToLiteral(p.Current())
 	if err != nil {
 		rep := report.NewReport("parse error").
+			WithLocation(p.Current().FileLoc).
 			WithMessage("expected '(expr)' or literal value for DEFAULT column constraint)").
 			WithLabels([]report.Label{{Source: p.Current().SourceCode, Range: p.Current().SourceRange, Note: "here"}})
 		p.ReportError(rep)
@@ -795,6 +810,7 @@ func (p *SqliteParser) MaybeConflictClause() *ast.ConflictClause {
 		{
 			p.ReportError(
 				report.NewReport("parse error").
+					WithLocation(p.Current().FileLoc).
 					WithLabels([]report.Label{
 						{
 							Source: p.Current().SourceCode,

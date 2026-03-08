@@ -62,7 +62,7 @@ func resolveMissingColumns(
 		}
 
 		sel := prompt.Select{}
-		title := fmt.Sprintf("Resolve table %s: Is this column new or renamed?", newCol.ColumnName.Text)
+		title := fmt.Sprintf("Resolve column %s.%s: Is this column new or renamed?", table.ObjectName.Text, newCol.ColumnName.Text)
 		choiceIndex, err := sel.Do(&terminal, title, options)
 		if err != nil {
 			panic(err)

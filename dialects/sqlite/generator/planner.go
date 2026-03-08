@@ -49,6 +49,28 @@ import (
 //  6. Transaction Grouping: Group related sequences of operations (like the
 //     entire table recreation process) into logical units that should be
 //     executed within a single transaction to ensure atomicity.
-func (gen *SqliteGenerator) Plan(ast []ast.Statement, ops []diff.Op) []diff.Op {
-	return nil
+func (gen *SqliteGenerator) Plan(statements []ast.Statement, ops []diff.Op) ([]diff.Op, error) {
+
+	schemaGraph := NewSchemaGraph()
+
+	for _, stmt := range statements {
+		switch typ := stmt.(type) {
+		case *ast.CreateTable:
+			err := schemaGraph.AddTable(typ)
+			if err != nil {
+				return nil, err
+			}
+		default:
+			continue
+		}
+	}
+
+	err := schemaGraph.Resolve()
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = schemaGraph.Sort(statements)
+
+	return nil, nil
 }

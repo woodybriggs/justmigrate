@@ -225,203 +225,203 @@ type BaseVisitor struct {
 
 func (v *BaseVisitor) VisitForeignKeyActionNoAction(*NoAction) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitForeignKeyActionNoAction\n")
+		fmt.Fprintf(os.Stderr, "VisitForeignKeyActionNoAction")
 	}
 }
 func (v *BaseVisitor) VisitForeignKeyActionCascade(*Cascade) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitForeignKeyActionCascade\n")
+		fmt.Fprintf(os.Stderr, "VisitForeignKeyActionCascade")
 	}
 }
 func (v *BaseVisitor) VisitForeignKeyActionSetNull(*SetNull) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitForeignKeyActionSetNull\n")
+		fmt.Fprintf(os.Stderr, "VisitForeignKeyActionSetNull")
 	}
 }
 func (v *BaseVisitor) VisitForeignKeyActionSetDefault(*SetDefault) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitForeignKeyActionSetDefault\n")
+		fmt.Fprintf(os.Stderr, "VisitForeignKeyActionSetDefault")
 	}
 }
 func (v *BaseVisitor) VisitForeignKeyActionRestrict(*Restrict) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitForeignKeyActionRestrict\n")
+		fmt.Fprintf(os.Stderr, "VisitForeignKeyActionRestrict")
 	}
 }
 
 func (v *BaseVisitor) VisitTypeName(*TypeName) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitTypeName\n")
+		fmt.Fprintf(os.Stderr, "VisitTypeName")
 	}
 }
 
 func (v *BaseVisitor) VisitDropTable(*DropTable) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitDropTable\n")
+		fmt.Fprintf(os.Stderr, "VisitDropTable")
 	}
 }
 func (v *BaseVisitor) VisitCreateTable(*CreateTable) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitCreateTable\n")
+		fmt.Fprintf(os.Stderr, "VisitCreateTable")
 	}
 }
 func (v *BaseVisitor) VisitCreateIndex(*CreateIndex) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitCreateIndex\n")
+		fmt.Fprintf(os.Stderr, "VisitCreateIndex")
 	}
 }
 func (v *BaseVisitor) VisitCreateView(*CreateView) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitCreateView\n")
+		fmt.Fprintf(os.Stderr, "VisitCreateView")
 	}
 }
 func (v *BaseVisitor) VisitAlterTable(*AlterTable) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitAlterTable\n")
+		fmt.Fprintf(os.Stderr, "VisitAlterTable")
 	}
 }
 func (v *BaseVisitor) VisitTableAlterationAddColumn(*AddColumn) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitTableAlterationAddColumn\n")
+		fmt.Fprintf(os.Stderr, "VisitTableAlterationAddColumn")
 	}
 }
 func (v *BaseVisitor) VisitTableAlterationDropColumn(*DropColumn) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitTableAlterationDropColumn\n")
+		fmt.Fprintf(os.Stderr, "VisitTableAlterationDropColumn")
 	}
 }
 func (v *BaseVisitor) VisitTableConstraintCheck(*TableConstraint_Check) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitTableConstraintCheck\n")
+		fmt.Fprintf(os.Stderr, "VisitTableConstraintCheck")
 	}
 }
 func (v *BaseVisitor) VisitTableConstraintPrimaryKey(*TableConstraint_PrimaryKey) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitTableConstraintPrimaryKey\n")
+		fmt.Fprintf(os.Stderr, "VisitTableConstraintPrimaryKey")
 	}
 }
 func (v *BaseVisitor) VisitTableConstraintForeignKey(*TableConstraint_ForeignKey) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitTableConstraintForeignKey\n")
+		fmt.Fprintf(os.Stderr, "VisitTableConstraintForeignKey")
 	}
 }
 func (v *BaseVisitor) VisitColumnConstraintPrimaryKey(*ColumnConstraint_PrimaryKey) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitColumnConstraintPrimaryKey\n")
+		fmt.Fprintf(os.Stderr, "VisitColumnConstraintPrimaryKey")
 	}
 }
 func (v *BaseVisitor) VisitColumnConstraintForeignKey(*ColumnConstraint_ForeignKey) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitColumnConstraintForeignKey\n")
+		fmt.Fprintf(os.Stderr, "VisitColumnConstraintForeignKey")
 	}
 }
 func (v *BaseVisitor) VisitColumnConstraintDefault(*ColumnConstraint_Default) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitColumnConstraintDefault\n")
+		fmt.Fprintf(os.Stderr, "VisitColumnConstraintDefault")
 	}
 }
 func (v *BaseVisitor) VisitColumnConstraintCheck(*ColumnConstraint_Check) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitColumnConstraintCheck\n")
+		fmt.Fprintf(os.Stderr, "VisitColumnConstraintCheck")
 	}
 }
 func (v *BaseVisitor) VisitColumnConstraintUnique(*ColumnConstraint_Unique) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitColumnConstraintUnique\n")
+		fmt.Fprintf(os.Stderr, "VisitColumnConstraintUnique")
 	}
 }
 func (v *BaseVisitor) VisitColumnConstraintGenerated(*ColumnConstraint_Generated) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitColumnConstraintGenerated\n")
+		fmt.Fprintf(os.Stderr, "VisitColumnConstraintGenerated")
 	}
 }
 func (v *BaseVisitor) VisitColumnConstraintCollate(*ColumnConstraint_Collate) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitColumnConstraintCollate\n")
+		fmt.Fprintf(os.Stderr, "VisitColumnConstraintCollate")
 	}
 }
 func (v *BaseVisitor) VisitColumnConstraintNotNull(*ColumnConstraint_NotNull) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitColumnConstraintNotNull\n")
+		fmt.Fprintf(os.Stderr, "VisitColumnConstraintNotNull")
 	}
 }
 func (v *BaseVisitor) VisitForeignKeyDeleteAction(*ForeignKeyDeleteAction) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitForeignKeyDeleteAction\n")
+		fmt.Fprintf(os.Stderr, "VisitForeignKeyDeleteAction")
 	}
 }
 func (v *BaseVisitor) VisitForeignKeyUpdateAction(*ForeignKeyUpdateAction) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitForeignKeyUpdateAction\n")
+		fmt.Fprintf(os.Stderr, "VisitForeignKeyUpdateAction")
 	}
 }
 func (v *BaseVisitor) VisitIdentifier(*Identifier) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitIdentifier\n")
+		fmt.Fprintf(os.Stderr, "VisitIdentifier")
 	}
 }
 func (v *BaseVisitor) VisitExprList(ExprList) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitExprList\n")
+		fmt.Fprintf(os.Stderr, "VisitExprList")
 	}
 }
 func (v *BaseVisitor) VisitLiteralString(*LiteralString) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitLiteralString\n")
+		fmt.Fprintf(os.Stderr, "VisitLiteralString")
 	}
 }
 func (v *BaseVisitor) VisitLiteralBoolean(*LiteralBoolean) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitLiteralBoolean\n")
+		fmt.Fprintf(os.Stderr, "VisitLiteralBoolean")
 	}
 }
 func (v *BaseVisitor) VisitLiteralSignedInteger(*LiteralSignedInteger) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitLiteralSignedInteger\n")
+		fmt.Fprintf(os.Stderr, "VisitLiteralSignedInteger")
 	}
 }
 func (v *BaseVisitor) VisitLiteralUnsignedInteger(*LiteralUnsignedInteger) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitLiteralUnsignedInteger\n")
+		fmt.Fprintf(os.Stderr, "VisitLiteralUnsignedInteger")
 	}
 }
 func (v *BaseVisitor) VisitLiteralFloat(*LiteralFloat) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitLiteralFloat\n")
+		fmt.Fprintf(os.Stderr, "VisitLiteralFloat")
 	}
 }
 func (v *BaseVisitor) VisitLiteralNull(*LiteralNull) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitLiteralNull\n")
+		fmt.Fprintf(os.Stderr, "VisitLiteralNull")
 	}
 }
 func (v *BaseVisitor) VisitFunctionCall(*FunctionCall) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitFunctionCall\n")
+		fmt.Fprintf(os.Stderr, "VisitFunctionCall")
 	}
 }
 func (v *BaseVisitor) VisitColumnName(*ColumnName) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitColumnName\n")
+		fmt.Fprintf(os.Stderr, "VisitColumnName")
 	}
 }
 func (v *BaseVisitor) VisitBinaryOp(*BinaryOp) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitBinaryOp\n")
+		fmt.Fprintf(os.Stderr, "VisitBinaryOp")
 	}
 }
 func (v *BaseVisitor) VisitCaseExpression(*CaseExpression) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitCaseExpression\n")
+		fmt.Fprintf(os.Stderr, "VisitCaseExpression")
 	}
 }
 func (v *BaseVisitor) VisitColumnDefinition(*ColumnDefinition) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitColumnDefinition\n")
+		fmt.Fprintf(os.Stderr, "VisitColumnDefinition")
 	}
 }
 func (v *BaseVisitor) VisitCatalogObjectIdentifier(*CatalogObjectIdentifier) {
 	if v.Debug {
-		fmt.Fprintf(os.Stderr, "VisitCatalogObjectIdentifier\n")
+		fmt.Fprintf(os.Stderr, "VisitCatalogObjectIdentifier")
 	}
 }
