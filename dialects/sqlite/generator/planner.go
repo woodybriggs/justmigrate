@@ -1,8 +1,13 @@
 package generator
 
 import (
+	"errors"
+	"fmt"
+	"os"
+	"slices"
 	"woodybriggs/justmigrate/core/ast"
 	"woodybriggs/justmigrate/core/diff"
+	"woodybriggs/justmigrate/core/formatter"
 )
 
 // Plan takes a first pass of "dumb" operations (create table, drop table, etc.)
@@ -49,28 +54,103 @@ import (
 //  6. Transaction Grouping: Group related sequences of operations (like the
 //     entire table recreation process) into logical units that should be
 //     executed within a single transaction to ensure atomicity.
-func (gen *SqliteGenerator) Plan(statements []ast.Statement, ops []diff.Op) ([]diff.Op, error) {
-
-	schemaGraph := NewSchemaGraph()
-
-	for _, stmt := range statements {
-		switch typ := stmt.(type) {
-		case *ast.CreateTable:
-			err := schemaGraph.AddTable(typ)
-			if err != nil {
-				return nil, err
+func (gen *SqliteFormatter) Plan(src, tgt []ast.Statement, ops []diff.Op) ([]diff.Op, error) {
+	var errs []error
+	srcGraph, err := NewSchemaGraphFromStatements(src)
+	if err != nil {
+		if er, ok := err.(interface{ Unwrap() []error }); ok {
+			for _, e := range er.Unwrap() {
+				errs = append(errs, e)
 			}
+		}
+	}
+	tgtGraph, err := NewSchemaGraphFromStatements(tgt)
+	if err != nil {
+		if er, ok := err.(interface{ Unwrap() []error }); ok {
+			for _, e := range er.Unwrap() {
+				errs = append(errs, e)
+			}
+		}
+	}
+	_ = tgtGraph
+
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+
+	for _, op := range ops {
+		fmt.Printf("%T %+v", op, op)
+	}
+
+	var plan []diff.Op
+	for _, op := range ops {
+		switch o := op.(type) {
+		case *diff.DelColOp:
+			// can we be certain about this lookup?, given that the ops were generated from the schemas
+
+			// if deleting the column will break a foreign key somewhere
+			// we need to drop the fk constraint in that table
+			// for now I think we push a generic "drop constraint op"
+			// and we will have to do at least 2 passes over the plan
+			// to ensure that the plan is suitable for the dialect in this case 'sqlite'
+
+			ogTable := srcGraph.Tables[o.Table.ObjectName.Text]
+			childTables := srcGraph.Columns[ogTable.Name][o.Col.Text].DependantTables
+			for _, child := range childTables {
+				// for each dependant child
+				_ = child
+			}
+
+			newTable := ast.Copy(ogTable.CreateTable).(*ast.CreateTable)
+			dropColumn(newTable, o.Col)
+
+			fmtter := NewSqliteFormatter(false, formatter.NewCoreFormatter(os.Stdout, 80, "\"\""))
+			fmtter.VisitStatements([]ast.Statement{newTable})
+		case *diff.ChangeColTypeOp:
+			// These operations are not natively supported and require lowering to a
+			// full table recreation.
+			// The `lowerTableRecreation` helper would generate the sequence:
+			//  - CREATE new table
+			//  - INSERT INTO new_table SELECT ... FROM old_table
+			//  - DROP old_table
+			//  - RENAME new_table
+			//  - Re-create indexes and triggers
+			// recreateOps, err := gen.lowerTableRecreation(o.TableName, statements, schemaGraph)
+			// if err != nil {
+			// 	return nil, err
+			// }
+			// plan = append(plan, recreateOps...)
+			_ = o // Avoid unused variable error for this example
+
 		default:
-			continue
+			// By default, assume the operation is natively supported (e.g., CreateTable,
+			// AddColumn, DropTable). These can be added directly to the plan.
+			// The final sorting step will handle their execution order.
+			plan = append(plan, o)
 		}
 	}
 
-	err := schemaGraph.Resolve()
-	if err != nil {
-		return nil, err
+	// 3. Sort the final plan to respect dependencies (e.g., using a topological sort).
+	// sortedPlan, err := sortOps(plan, schemaGraph)
+
+	// 4. Add final pragmas.
+	// plan = append(plan, &PragmaOp{Key: "foreign_keys", Value: "ON"})
+	// plan = append(plan, &PragmaOp{Key: "foreign_key_check", Value: ""})
+
+	return plan, nil
+}
+
+func dropColumn(table *ast.CreateTable, colName *ast.Identifier) {
+	indexOfCol := slices.IndexFunc(table.TableDefinition.ColumnDefinitions, func(col ast.ColumnDefinition) bool {
+		return col.ColumnName.Eq(colName.AsExpr())
+	})
+
+	if indexOfCol == -1 {
+		return
 	}
 
-	_, err = schemaGraph.Sort(statements)
-
-	return nil, nil
+	table.TableDefinition.ColumnDefinitions = append(
+		table.TableDefinition.ColumnDefinitions[:indexOfCol],
+		table.TableDefinition.ColumnDefinitions[indexOfCol+1:]...,
+	)
 }

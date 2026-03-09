@@ -88,7 +88,9 @@ func (r *Renderer) Render(report Report) string {
 
 	for _, row := range canvas {
 		if row.IsSrc {
-			fmt.Fprintf(&sb, "%s │ %s\n", r.inGutter(fmt.Sprint(row.LineNum)), row.Content)
+			fmt.Fprintf(&sb, "%s │ ", r.inGutter(fmt.Sprint(row.LineNum)))
+			syntaxHighlight(&sb, row)
+			fmt.Fprint(&sb, "\n")
 		} else {
 			fmt.Fprintf(&sb, "%s │ %s\n", r.inGutter(""), row.Content)
 		}

@@ -8,6 +8,7 @@ import (
 )
 
 type Formatter interface {
+	Write(p []byte) (int, error)
 	Identifier(s string)
 	Text(s string)
 	Rune(r rune)
@@ -17,6 +18,13 @@ type Formatter interface {
 	Indent(fn func()) // increase logical nesting
 	Anchor(fn func()) // align subsequent lines to current column
 	Group(fn func())  // try to fit everything inside on one line
+}
+
+type Painter interface {
+	SetForegroundColor(r, g, b byte)
+	SetBackgroundColor(r, g, b byte)
+	ResetForegroundColor()
+	ResetBackgroundColor()
 }
 
 type FormatMode int
@@ -62,6 +70,10 @@ func NewCoreFormatter(w io.Writer, maxWidth int, escapeIdentWith string) *CoreFo
 		escapeIdentifierStart: escapeIdentifierStart,
 		escapeIdentifierEnd:   escapeIdentifierEnd,
 	}
+}
+
+func (f *CoreFormatter) Write(p []byte) (int, error) {
+	return f.writer.Write(p)
 }
 
 func (f *CoreFormatter) Space() {
@@ -169,7 +181,6 @@ func (f *CoreFormatter) Group(fn func()) {
 }
 
 func (f *CoreFormatter) getPadding() int {
-	// If anchored, use anchor. If not, use indent level.
 	if len(f.anchorStack.Data) > 0 {
 		v, _ := f.anchorStack.Top()
 		return v

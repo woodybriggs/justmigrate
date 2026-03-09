@@ -368,6 +368,8 @@ type Token struct {
 	}
 	SourceRange TextRange
 	Kind        TokenKind
+	OpenQuote   rune
+	CloseQuote  rune
 
 	FileLoc Location
 
@@ -376,7 +378,11 @@ type Token struct {
 }
 
 func (t Token) String() string {
-	return fmt.Sprintf("%s%s%s", t.LeadingTrivia, t.Text, t.TrailingTrivia)
+	return fmt.Sprintf("%s%c%s%c%s", t.LeadingTrivia, t.OpenQuote, t.Text, t.CloseQuote, t.TrailingTrivia)
+}
+
+func (t Token) Quoted() string {
+	return fmt.Sprintf("%c%s%c", t.OpenQuote, t.Text, t.CloseQuote)
 }
 
 func (t Token) DebugString() string {

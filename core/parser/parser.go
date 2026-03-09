@@ -45,8 +45,16 @@ func NewParser(lexer *luther.Lexer) *Parser {
 	return result
 }
 
-func (p *Parser) Errors() []report.Report {
+func (p *Parser) ErrorsAsReportSlice() []report.Report {
 	return slices.Collect(maps.Values(p.errors))
+}
+
+func (p *Parser) ErrorsAsErrorSlice() []error {
+	result := make([]error, 0, len(p.errors))
+	for _, value := range p.errors {
+		result = append(result, &value)
+	}
+	return []error(result)
 }
 
 func (p *Parser) Advance() {

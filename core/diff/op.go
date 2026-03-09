@@ -6,6 +6,7 @@ type Op interface {
 	op()
 }
 
+func (*TransactionOp) op()   {}
 func (*NewTableOp) op()      {}
 func (*DelTableOp) op()      {}
 func (*RenameTableOp) op()   {}
@@ -13,6 +14,10 @@ func (*NewColOp) op()        {}
 func (*DelColOp) op()        {}
 func (*RenameColOp) op()     {}
 func (*ChangeColTypeOp) op() {}
+
+type TransactionOp struct {
+	ops []Op
+}
 
 type NewTableOp struct {
 	*ast.CreateTable

@@ -23,9 +23,17 @@ var (
 	ErrInvalidNode = errors.New("invalid ast node")
 )
 
-var (
-	ErrParserErrors = errors.New("parser has errors")
-)
+type ParserErrors struct {
+	Errs []error
+}
+
+func (e *ParserErrors) Error() string {
+	return fmt.Sprintf("parser has %d errors", len(e.Errs))
+}
+
+func (e *ParserErrors) Unwrap() []error {
+	return e.Errs
+}
 
 func assert(cond bool, err error) {
 	if !cond {
@@ -68,10 +76,11 @@ func AstFromDatabase(database Database) (luther.SourceCode, []ast.Statement, err
 	parser := sqliteparser.NewSqliteParser(lexer)
 
 	nodes := parser.Statements()
-	errors := parser.Errors()
+	errors := parser.ErrorsAsErrorSlice()
 	if len(errors) > 0 {
-		ShowErrors(errors, os.Stderr)
-		return parser.Current().SourceCode, nil, ErrParserErrors
+		return parser.Current().SourceCode, nil, &ParserErrors{
+			Errs: errors,
+		}
 	}
 
 	// warnings := slices.Collect(maps.Values(parser.Warnings))
@@ -91,11 +100,11 @@ func AstFromFile(file *os.File) (luther.SourceCode, []ast.Statement, error) {
 	parser := sqliteparser.NewSqliteParser(lexer)
 
 	nodes := parser.Statements()
-	errors := parser.Errors()
-
+	errors := parser.ErrorsAsErrorSlice()
 	if len(errors) > 0 {
-		ShowErrors(errors, os.Stderr)
-		return lexer.SourceCode, nil, ErrParserErrors
+		return lexer.SourceCode, nil, &ParserErrors{
+			Errs: parser.ErrorsAsErrorSlice(),
+		}
 	}
 
 	// warnings := slices.Collect(maps.Values(parser.Warnings))
@@ -126,7 +135,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	_, dstAst, err := AstFromFile(file)
+	_, tgtAst, err := AstFromFile(file)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ast from file failed with err %v", err)
 		os.Exit(1)
@@ -140,28 +149,24 @@ func main() {
 
 	differ := diff.Diff{}
 
-	ops, err := differ.DiffSchema(srcAst, dstAst)
+	ops, err := differ.DiffSchema(srcAst, tgtAst)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "diff schema failed with err %v", err)
 		os.Exit(1)
 	}
 
-	gen := sqlitegen.SqliteGenerator{}
+	gen := sqlitegen.SqliteFormatter{}
 
-	ops, err = gen.Plan(dstAst, ops)
+	ops, err = gen.Plan(srcAst, tgtAst, ops)
 
 	type multiError interface {
+		Error() string
 		Unwrap() []error
 	}
 	if err != nil {
-		if errs, ok := errors.AsType[*sqlitegen.MissingColumnsErr](err); ok {
-			for _, err := range errs.Unwrap() {
-				fmt.Println(err)
-			}
-		}
-		if errs, ok := errors.AsType[*sqlitegen.ErrSchemaResolutionFailed](err); ok {
-			for _, err := range errs.Unwrap() {
-				fmt.Println(err)
+		if errs, ok := errors.AsType[multiError](err); ok {
+			for _, report := range errs.Unwrap() {
+				fmt.Println(report)
 			}
 		}
 	}

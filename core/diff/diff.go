@@ -34,7 +34,10 @@ func resolveMissingColumns(
 
 	unresolvedRemovedCols := removed
 	terminal := prompt.Terminal{}
-	terminal.Start()
+	err := terminal.Start()
+	if err != nil {
+		return removed, added, ops
+	}
 	defer terminal.Restore()
 
 	for _, newCol := range added {
@@ -98,7 +101,9 @@ func resolveMissingTables(
 
 	unresolvedRemovedTables := removed
 	terminal := prompt.Terminal{}
-	terminal.Start()
+	if err := terminal.Start(); err != nil {
+		return removed, added, ops
+	}
 	defer terminal.Restore()
 
 	for _, newTable := range added {
@@ -241,12 +246,14 @@ func (diff *Diff) DiffCreateTable(src, tgt *ast.CreateTable) []Op {
 	}
 
 	/*
-		We need to extract out the table constraints by type.
+			We need to extract out the table constraints by type.
 
-		1. We know that there is only ever one PK constraint per table
-		2. We can collect and compare all FK constraints
-		3. We can collect and compare all UNIQUE constraints
-		4. We can collect and compare all CHECK constraints
+			1. We know that there is only ever one PK constraint per table
+			2. We can collect and compare all FK constraints
+		       we might be able to skip FK constraints as they would likely be handled in the planner
+			   where we explicity check all FK constraints for referentaial integrety.
+			3. We can collect and compare all UNIQUE constraints
+			4. We can collect and compare all CHECK constraints
 	*/
 
 	return ops

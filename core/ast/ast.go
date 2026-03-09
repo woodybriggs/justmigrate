@@ -8,6 +8,11 @@ import (
 
 type Identifier tik.Token
 
+func MakeIdentifier(token tik.Token) *Identifier {
+	ident := Identifier(token)
+	return &ident
+}
+
 func (t *Identifier) node()            {}
 func (t *Identifier) nodeExpression()  {}
 func (t *Identifier) nodeIdentifier()  {}

@@ -31,6 +31,7 @@ func (uce *MissingColumnsErr) Unwrap() []error {
 	errs := []error{}
 	for _, col := range uce.Columns {
 		err := report.NewReport("invalid foreign key").
+			WithLocation(col.FileLoc).
 			WithLabels(
 				[]report.Label{
 					{
@@ -46,7 +47,10 @@ func (uce *MissingColumnsErr) Unwrap() []error {
 				},
 			).
 			WithMessage(fmt.Sprintf("\"%s\" does not exist on table \"%s\"", col.Text, uce.Table.ObjectName.Text)).
-			WithNotes([]string{"add the missing column to the table"})
+			WithNotes([]string{
+				"add the missing column to the table or",
+				"remove the foreign key constraint as well as the column",
+			})
 
 		errs = append(errs, err)
 	}
@@ -55,14 +59,65 @@ func (uce *MissingColumnsErr) Unwrap() []error {
 
 type SchemaGraph struct {
 	Tables                    map[string]*Table
+	Columns                   map[string]map[string]*Column
 	unresolvedForeignKeyEdges []UnresolvedForeignKeyEdge
 }
 
 func NewSchemaGraph() *SchemaGraph {
 	return &SchemaGraph{
 		Tables:                    map[string]*Table{},
+		Columns:                   map[string]map[string]*Column{},
 		unresolvedForeignKeyEdges: []UnresolvedForeignKeyEdge{},
 	}
+}
+
+type SchemaError struct {
+	Errs []error
+}
+
+func (e *SchemaError) Error() string {
+	return fmt.Sprintf("schema has %d errors", len(e.Errs))
+}
+
+func (e *SchemaError) Unwrap() []error {
+	return e.Errs
+}
+
+func NewSchemaGraphFromStatements(statements []ast.Statement) (*SchemaGraph, error) {
+
+	errs := []error{}
+
+	sg := NewSchemaGraph()
+	for _, statement := range statements {
+		switch stmt := statement.(type) {
+		case *ast.CreateTable:
+			err := sg.AddTable(stmt)
+			if err != nil {
+				if er, ok := err.(interface{ Unwrap() []error }); ok {
+					for _, e := range er.Unwrap() {
+						errs = append(errs, e)
+					}
+				}
+			}
+		}
+	}
+
+	err := sg.Resolve()
+	if err != nil {
+		if er, ok := err.(interface{ Unwrap() []error }); ok {
+			for _, e := range er.Unwrap() {
+				errs = append(errs, e)
+			}
+		}
+	}
+
+	if len(errs) > 0 {
+		return sg, &SchemaError{
+			Errs: errs,
+		}
+	}
+
+	return sg, nil
 }
 
 func (sg *SchemaGraph) Sort(statements []ast.Statement) ([]ast.Statement, error) {
@@ -85,22 +140,26 @@ func (sg *SchemaGraph) Sort(statements []ast.Statement) ([]ast.Statement, error)
 }
 
 func (sg *SchemaGraph) sort() ([]*Table, error) {
+	// initialise indegree bookkeeping
 	inDegree := map[string]int{}
-
 	for _, table := range sg.Tables {
 		inDegree[table.Name] = 0
 	}
 
+	// record initial incoming edges for each table
 	for _, table := range sg.Tables {
 		for _, edge := range table.ForeignKeys {
 			inDegree[edge.ToTable.Name] += 1
 		}
 	}
 
+	// initialise queue for khans algo
 	// not nessecary, but is nice for the data of the Queue to fit into a single cache line
 	cacheLineSize := int(unsafe.Sizeof(cpu.CacheLinePad{}))
 	ptrSize := int(unsafe.Sizeof(uintptr(0)))
 	q := datastructures.NewQueue[*Table](cacheLineSize / ptrSize)
+
+	// for each table that has 0 incoming fks we can visit them first
 	for name, degree := range inDegree {
 		if degree == 0 {
 			q.Enqueue(sg.Tables[name])
@@ -108,6 +167,11 @@ func (sg *SchemaGraph) sort() ([]*Table, error) {
 	}
 
 	order := []*Table{}
+	// while there are tables to visit on the queue,
+	// 1. add the node to the order (it has 0 referencing parents)
+	// 2. follow the edge to the referencing tables
+	// 3. decrement the indegree and and if the resulting indegree
+	// 4. is 0 (no more referencing tables), it can be added to the queue
 	for node, ok := q.Dequeue(); ok; node, ok = q.Dequeue() {
 		order = append(order, node)
 		for _, edge := range node.ForeignKeys {
@@ -136,6 +200,11 @@ func (sg *SchemaGraph) sort() ([]*Table, error) {
 	return order, nil
 }
 
+type missingColumn struct {
+	MissingColumnIdentifier ast.Identifier
+	ReferencingTo           *ast.CreateTable
+}
+
 type missingTable struct {
 	MissingTableIdentifier ast.CatalogObjectIdentifier
 	ReferencedBy           *ast.CreateTable
@@ -143,7 +212,7 @@ type missingTable struct {
 
 type ErrSchemaResolutionFailed struct {
 	MissingTables  []missingTable
-	MissingColumns []ast.Identifier
+	MissingColumns []missingColumn
 }
 
 func (err *ErrSchemaResolutionFailed) Error() string {
@@ -170,7 +239,7 @@ func (srf *ErrSchemaResolutionFailed) Unwrap() []error {
 				{
 					Source: referencedSource,
 					Range:  referencedRange,
-					Note:   "forign key",
+					Note:   "foreign key",
 				},
 			})
 
@@ -179,12 +248,22 @@ func (srf *ErrSchemaResolutionFailed) Unwrap() []error {
 
 	for _, col := range srf.MissingColumns {
 		err := report.NewReport("invalid foreign key").
-			WithLabels([]report.Label{{
-				Source: col.SourceCode,
-				Range:  col.SourceRange,
-				Note:   "here",
-			}}).
-			WithNotes([]string{"the column referenced does not exist on the foreign table"})
+			WithLocation(col.MissingColumnIdentifier.FileLoc).
+			WithLabels([]report.Label{
+				{
+					Source: col.MissingColumnIdentifier.SourceCode,
+					Range:  col.MissingColumnIdentifier.SourceRange,
+					Note:   fmt.Sprintf("this column is missing in table \"%s\"", col.ReferencingTo.TableIdentifier.ObjectName.Text),
+				},
+				{
+					Source: col.ReferencingTo.TableIdentifier.ObjectName.SourceCode,
+					Range:  col.ReferencingTo.TableIdentifier.ObjectName.SourceRange,
+					Note:   fmt.Sprintf("this table is missing column \"%s\"", col.MissingColumnIdentifier.Text),
+				},
+			}).
+			WithNotes([]string{
+				fmt.Sprintf("column \"%s\" does exist on the foreign key table \"%s\"", col.MissingColumnIdentifier.Text, col.ReferencingTo.TableIdentifier.ObjectName.Text),
+			})
 
 		errs = append(errs, err)
 	}
@@ -195,9 +274,9 @@ func (srf *ErrSchemaResolutionFailed) Unwrap() []error {
 func (sg *SchemaGraph) Resolve() error {
 
 	missingTables := []missingTable{}
-	totalMissingColumns := []ast.Identifier{}
+	missingColumns := []missingColumn{}
+	totalMissingColumns := []missingColumn{}
 
-	missingColumns := []ast.Identifier{}
 	for _, unresolved := range sg.unresolvedForeignKeyEdges {
 		missingColumns = missingColumns[:0]
 		toTable, hasTable := sg.TableByIdent(&unresolved.ToTable)
@@ -212,7 +291,10 @@ func (sg *SchemaGraph) Resolve() error {
 		toColumns, founds := sg.ColumnsByIdents(toTable, unresolved.ToColumns)
 		for i, found := range founds {
 			if !found {
-				missingColumns = append(missingColumns, unresolved.ToColumns[i])
+				missingColumns = append(missingColumns, missingColumn{
+					MissingColumnIdentifier: unresolved.ToColumns[i],
+					ReferencingTo:           toTable.CreateTable,
+				})
 			}
 		}
 
@@ -267,15 +349,18 @@ func validateColumnsExist(table *ast.CreateTable, idents ast.IdentifierList) (er
 	return
 }
 
-func validateTableConstraints(t *ast.CreateTable) (err error) {
+// validates that the local part of the foreign key
+// (the binding column) is actually present on the table
+func validateForeignKeyConstraintsLocal(t *ast.CreateTable) (errs error) {
+
 	for _, constraint := range t.TableDefinition.TableConstraints {
 
 		switch c := constraint.(type) {
 		case *ast.TableConstraint_ForeignKey:
 			// check that the tables.columns in the fk actually exist
-			err = validateColumnsExist(t, c.Columns)
+			err := validateColumnsExist(t, c.Columns)
 			if err != nil {
-				return
+				errs = errors.Join(err)
 			}
 		default:
 			continue
@@ -285,20 +370,37 @@ func validateTableConstraints(t *ast.CreateTable) (err error) {
 	return
 }
 
-func (sg *SchemaGraph) AddTable(t *ast.CreateTable) error {
+type TableValidationError struct {
+	Table *ast.CreateTable
+	Errs  []error
+}
 
-	err := validateTableConstraints(t)
-	if err != nil {
-		return err
+func (e *TableValidationError) Error() string {
+	return fmt.Sprintf("table %s has %d validation errors", e.Table.TableIdentifier.ObjectName.Text, len(e.Errs))
+}
+
+func (e *TableValidationError) Unwrap() []error {
+	return e.Errs
+}
+
+func (sg *SchemaGraph) AddTable(t *ast.CreateTable) error {
+	var validationErrors []error
+
+	if err := validateForeignKeyConstraintsLocal(t); err != nil {
+		if u, ok := err.(interface{ Unwrap() []error }); ok {
+			validationErrors = append(validationErrors, u.Unwrap()...)
+		} else {
+			validationErrors = append(validationErrors, err)
+		}
+		return &TableValidationError{Table: t, Errs: validationErrors}
 	}
 
 	table := &Table{
 		CreateTable: t,
 		Columns:     map[string]*Column{},
 	}
-	defer func() {
-		sg.Tables[t.TableIdentifier.ObjectName.Text] = table
-	}()
+	sg.Tables[t.TableIdentifier.ObjectName.Text] = table
+	sg.Columns[t.TableIdentifier.ObjectName.Text] = map[string]*Column{}
 
 	table.Name = t.TableIdentifier.ObjectName.Text
 	for _, column := range t.TableDefinition.ColumnDefinitions {
@@ -322,10 +424,14 @@ func (sg *SchemaGraph) AddTable(t *ast.CreateTable) error {
 			}
 
 			// validate that the foreign table has the foreign columns
-			err = validateColumnsExist(toTable.CreateTable, fk.FkClause.ForeignColumns)
+			err := validateColumnsExist(toTable.CreateTable, fk.FkClause.ForeignColumns)
 			if err != nil {
-				// @todo(woody) this early exists the loop we want to accumulate these errors up to not early exit
-				return err
+				if u, ok := err.(interface{ Unwrap() []error }); ok {
+					validationErrors = append(validationErrors, u.Unwrap()...)
+				} else {
+					validationErrors = append(validationErrors, err)
+				}
+				continue
 			}
 
 			// add the foreign key edge
@@ -336,6 +442,11 @@ func (sg *SchemaGraph) AddTable(t *ast.CreateTable) error {
 			)
 		}
 	}
+
+	if len(validationErrors) > 0 {
+		return &TableValidationError{Table: t, Errs: validationErrors}
+	}
+
 	return nil
 }
 
@@ -369,6 +480,7 @@ func (sg *SchemaGraph) AddColumn(table *Table, col *ast.ColumnDefinition) error 
 		Type: col.TypeName,
 	}
 	table.Columns[column.Name.Text] = column
+	sg.Columns[table.Name][column.Name.Text] = column
 
 	for _, constraint := range col.ColumnConstraints {
 		if fk, ok := constraint.(*ast.ColumnConstraint_ForeignKey); ok {
@@ -407,6 +519,11 @@ func (sg *SchemaGraph) AddIndex(t *ast.CreateIndex) {
 }
 
 func (table *Table) AddForeignKeyEdge(cols []*Column, foreignTable *Table, foreignCols []*Column) {
+
+	for _, foreignCol := range foreignCols {
+		foreignCol.DependantTables = append(foreignCol.DependantTables, table)
+	}
+
 	table.ForeignKeys = append(table.ForeignKeys, &ForeignKeyEdge{
 		FromTable:   table,
 		FromColumns: cols,
@@ -438,7 +555,11 @@ type Column struct {
 	Name ast.Identifier
 	Type *ast.TypeName
 
+	// the table that this column belongs to
 	ParentTable *Table
+
+	// tables that reference this column as a foreign key
+	DependantTables []*Table
 }
 
 type Index struct {

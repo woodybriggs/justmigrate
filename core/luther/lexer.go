@@ -397,6 +397,8 @@ func (t *Lexer) NextToken() (token tik.Token) {
 			t.eat()
 			token.Kind = tik.TokenKind_Identifier
 			token.Text = string(t.Raw[start:end])
+			token.OpenQuote = '"'
+			token.CloseQuote = '"'
 			return token
 		}
 	case '[':
@@ -415,6 +417,8 @@ func (t *Lexer) NextToken() (token tik.Token) {
 			t.eat()
 			token.Kind = tik.TokenKind_Identifier
 			token.Text = string(t.Raw[start:end])
+			token.OpenQuote = '['
+			token.CloseQuote = ']'
 			return token
 		}
 	case '`':
@@ -434,6 +438,8 @@ func (t *Lexer) NextToken() (token tik.Token) {
 			t.eat()
 			token.Kind = tik.TokenKind_Identifier
 			token.Text = string(t.Raw[start:end])
+			token.OpenQuote = '`'
+			token.CloseQuote = '`'
 			return token
 		}
 	case '\'':
@@ -453,6 +459,8 @@ func (t *Lexer) NextToken() (token tik.Token) {
 			t.eat()
 			end := t.Cur
 			token.Text = string(t.Raw[start:end])
+			token.OpenQuote = '\''
+			token.CloseQuote = '\''
 			return token
 		}
 	case '.':
