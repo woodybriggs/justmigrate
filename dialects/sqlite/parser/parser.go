@@ -75,16 +75,13 @@ func (p *SqliteParser) TableConstraint() ast.TableConstraint {
 			report.NewReport("warning").
 				WithLocation(p.Current().FileLoc).
 				WithMessage("unnamed table constraint").
-				WithLabels([]report.Label{
-					{
-						Source: p.Current().SourceCode,
-						Range:  p.Current().SourceRange,
-						Note:   "CONSTRAINT constraint_name",
-					},
-				}).
-				WithNotes([]string{
-					"by adding a constraint name, we can detect changes of table constraints, and migrate them appropriately.",
-				}),
+				WithLabels(
+					report.LabelFromToken(p.Current(), "CONSTRAINT constraint name"),
+				).
+				WithNotes(
+					"by adding a constraint name, we can detect changes of table" +
+						"constraints, and migrate them appropriately.",
+				),
 		)
 	}
 
@@ -99,13 +96,7 @@ func (p *SqliteParser) TableConstraint() ast.TableConstraint {
 		err := report.
 			NewReport("parse error").
 			WithLocation(p.Current().FileLoc).
-			WithLabels([]report.Label{
-				{
-					Source: p.Current().SourceCode,
-					Range:  p.Current().SourceRange,
-					Note:   "unexpected token for table constraint",
-				},
-			})
+			WithLabels(report.LabelFromToken(p.Current(), "unexpected token for table constraint"))
 		p.ReportError(err)
 		return nil
 	}
@@ -302,64 +293,49 @@ func (p *SqliteParser) ForeignKeyAction() ast.ForeignKeyAction {
 		p.ReportError(
 			report.NewReport("parse error").
 				WithLocation(p.Current().FileLoc).
-				WithLabels([]report.Label{
-					{
-						Source: p.Current().SourceCode,
-						Range:  p.Current().SourceRange,
-						Note:   "here",
-					},
-				}).
-				WithMessage("unexpected token when parsing foreign key action"),
+				WithLabels(report.LabelFromToken(p.Current(), "here")).
+				WithNotes("unexpected token when parsing foreign key action, expected 'update' or 'delete'"),
 		)
 		return nil
 	}
 }
 
 func (p *SqliteParser) ForeignKeyActionDo() ast.ForeignKeyActionDo {
-	if p.Current().Kind == tik.TokenKind_Keyword_SET {
+
+	switch p.Current().Kind {
+	case tik.TokenKind_Keyword_SET:
 		setKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_SET))
-		if p.Current().Kind == tik.TokenKind_Keyword_NULL {
+		switch p.Current().Kind {
+		case tik.TokenKind_Keyword_NULL:
 			nullKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_NULL))
 			return ast.MakeForeignKeyActionSetNull(setKeyword, nullKeyword)
-		} else if p.Current().Kind == tik.TokenKind_Keyword_DEFAULT {
+		case tik.TokenKind_Keyword_DEFAULT:
 			defaultKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_DEFAULT))
 			return ast.MakeForeignKeyActionSetDefault(setKeyword, defaultKeyword)
-		} else {
+		default:
 			p.ReportError(
 				report.NewReport("parse error").
 					WithLocation(p.Current().FileLoc).
-					WithLabels([]report.Label{
-						{
-							Source: p.Current().SourceCode,
-							Range:  p.Current().SourceRange,
-							Note:   "here",
-						},
-					}).
+					WithLabels(report.LabelFromToken(p.Current(), "here")).
 					WithMessage("expected 'null' or 'default' for set action of foreign key action"),
 			)
 			return nil
 		}
-	} else if p.Current().Kind == tik.TokenKind_Keyword_NO {
+	case tik.TokenKind_Keyword_NO:
 		noKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_NO))
 		actionKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_ACTION))
 		return ast.MakeForeignKeyActionNoAction(noKeyword, actionKeyword)
-	} else if p.Current().Kind == tik.TokenKind_Keyword_RESTRICT {
+	case tik.TokenKind_Keyword_RESTRICT:
 		restrictKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_RESTRICT))
 		return ast.MakeForeignKeyActionRestrict(restrictKeyword)
-	} else if p.Current().Kind == tik.TokenKind_Keyword_CASCADE {
+	case tik.TokenKind_Keyword_CASCADE:
 		cascadeKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_CASCADE))
 		return ast.MakeForeignKeyActionCascade(cascadeKeyword)
-	} else {
+	default:
 		p.ReportError(
 			report.NewReport("parse error").
 				WithLocation(p.Current().FileLoc).
-				WithLabels([]report.Label{
-					{
-						Source: p.Current().SourceCode,
-						Range:  p.Current().SourceRange,
-						Note:   "here",
-					},
-				}).
+				WithLabels(report.LabelFromToken(p.Current(), "here")).
 				WithMessage("expected action: one of ('set null', 'set default', 'no action', 'restrict', 'cascade') for foreign key action"),
 		)
 		return nil
@@ -393,13 +369,7 @@ func (p *SqliteParser) ForeignKeyDeferrable() *ast.ForeignKeyDeferrable {
 				report.
 					NewReport("parse errors").
 					WithLocation(p.Current().FileLoc).
-					WithLabels([]report.Label{
-						{
-							Source: p.Current().SourceCode,
-							Range:  p.Current().SourceRange,
-							Note:   "here",
-						},
-					}).
+					WithLabels(report.LabelFromToken(p.Current(), "here")).
 					WithMessage("expected value for 'deferrable initially' one of ('deferred' or 'immediate')"),
 			)
 			return nil
@@ -519,15 +489,12 @@ func (p *SqliteParser) LiteralNumericLiteral(negate *tik.Token) ast.NumericLiter
 		p.Advance()
 		val, err := strconv.ParseInt(token.Text, 10, 64)
 		if err != nil {
-			rep := report.NewReport("parse error").
-				WithLocation(p.Current().FileLoc).
-				WithMessage(err.Error()).
-				WithLabels([]report.Label{{
-					Source: token.SourceCode,
-					Range:  token.SourceRange,
-					Note:   "here",
-				}})
-			p.Parser.ReportError(rep)
+			p.Parser.ReportError(
+				report.NewReport("parse error").
+					WithLocation(p.Current().FileLoc).
+					WithLabels(report.LabelFromToken(p.Current(), "here")).
+					WithNotes(err.Error()),
+			)
 			return ast.MakeLiteralSignedInteger(token, 0)
 		}
 		if negate != nil {
@@ -538,15 +505,11 @@ func (p *SqliteParser) LiteralNumericLiteral(negate *tik.Token) ast.NumericLiter
 		p.Advance()
 		val, err := strconv.ParseFloat(token.Text, 64)
 		if err != nil {
-			rep := report.NewReport("parse error").
+			p.Parser.ReportError(report.NewReport("parse error").
 				WithLocation(p.Current().FileLoc).
-				WithMessage(err.Error()).
-				WithLabels([]report.Label{{
-					Source: token.SourceCode,
-					Range:  token.SourceRange,
-					Note:   "here",
-				}})
-			p.Parser.ReportError(rep)
+				WithNotes(err.Error()).
+				WithLabels(report.LabelFromToken(p.Current(), "here")),
+			)
 			return ast.MakeLiteralFloat(token, 0)
 		}
 		if negate != nil {
@@ -554,17 +517,11 @@ func (p *SqliteParser) LiteralNumericLiteral(negate *tik.Token) ast.NumericLiter
 		}
 		return ast.MakeLiteralFloat(token, val)
 	default:
-		rep := report.NewReport("parse error").
+		p.ReportError(report.NewReport("parse error").
 			WithLocation(p.Current().FileLoc).
-			WithMessage("expected numeric literal (signed integer or float)").
-			WithLabels([]report.Label{
-				{
-					Source: token.SourceCode,
-					Range:  token.SourceRange,
-					Note:   "here",
-				},
-			})
-		p.ReportError(rep)
+			WithNotes("expected numeric literal (signed integer or float)").
+			WithLabels(report.LabelFromToken(p.Current(), "here")),
+		)
 
 		// if the next token is a numeric literal, then we can skip the token and try parse again
 		if p.Peeked().Kind == tik.TokenKind_IntegerNumericLiteral || p.Peeked().Kind == tik.TokenKind_FloatNumericLiteral {
@@ -653,27 +610,34 @@ func (p *SqliteParser) ColumnConstraint() ast.ColumnConstraint {
 		//		return p.ColumnConstraint_Unique(constraintName)
 		//	case tik.TokenKind_Keyword_COLLATE:
 		//		return p.ColumnConstraint_Collate(constraintName)
-		//	case tik.TokenKind_Keyword_CHECK:
-		//		return p.ColumnConstraint_Check(constraintName)
+	case tik.TokenKind_Keyword_CHECK:
+		return p.ColumnConstraint_Check(constraintName)
 		//	case tik.TokenKind_Keyword_AS:
 		//		return p.ColumnConstraint_Generated(constraintName)
 		//	case tik.TokenKind_Keyword_GENERATED:
 		//		return p.ColumnConstraint_Generated(constraintName)
 	default:
 		{
-			p.ReportError(
+			err :=
 				report.
 					NewReport("parse error").
 					WithLocation(p.Current().FileLoc).
-					WithLabels([]report.Label{
-						{
-							Source: p.Current().SourceCode,
-							Range:  p.Current().SourceRange,
-							Note:   "unexpected token at start of column constraint",
-						},
-					}),
+					WithLabels(report.LabelFromToken(p.Current(), "here")).
+					WithNotes("unexpected token at start of column constraint")
+
+			// if the next token is a valid constraint name, then we can skip the current and try parse again.
+			if isColumnConstraintStartingToken(p.Peeked()) {
+				err.WithNotes("faliure token will be skipped")
+				p.Advance()
+				return p.ColumnConstraint()
+			}
+
+			// otherwise we need to pretend that we got something, check NULL constraint seems to be safest.
+			return ast.MakeColumnConstraintCheck(
+				constraintName,
+				ast.Keyword{Text: "CHECK"},
+				ast.MakeLiteralNull(tik.Token{Text: "NULL"}),
 			)
-			return nil
 		}
 	}
 }
@@ -747,21 +711,29 @@ func (p *SqliteParser) ColumnConstraint_Default(constraintName *ast.ConstraintNa
 	if err != nil {
 		rep := report.NewReport("parse error").
 			WithLocation(p.Current().FileLoc).
-			WithMessage("expected '(expr)' or literal value for DEFAULT column constraint)").
-			WithLabels([]report.Label{{Source: p.Current().SourceCode, Range: p.Current().SourceRange, Note: "here"}})
+			WithNotes("expected '(expr)' or literal value for DEFAULT column constraint)").
+			WithLabels(report.LabelFromToken(p.Current(), "here"))
 		p.ReportError(rep)
 
 		// if the next token ahead is the start of a new column constraint or the end of column/table def
 		// then we can skip the current token with the reported error above
-		lit = ast.MakeLiteralNull(p.Current())
+		tok := p.Current()
 		if isColumnConstraintStartingToken(p.Peeked()) || p.Peeked().Kind == ',' || p.Peeked().Kind == ')' {
 			p.Advance()
 		}
-
-		return ast.MakeColumnConstraintDefault(constraintName, defaultKeyword, lit)
+		lit = ast.MakeParseError(err, tok)
 	}
 
 	return ast.MakeColumnConstraintDefault(constraintName, defaultKeyword, lit)
+}
+
+func (p *SqliteParser) ColumnConstraint_Check(constraintName *ast.ConstraintName) *ast.ColumnConstraint_Check {
+	p.PushParseContext("column constraint check")
+	defer p.PopParseContext()
+
+	checkKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_CHECK))
+	expr := p.Expr(0)
+	return ast.MakeColumnConstraintCheck(constraintName, checkKeyword, expr)
 }
 
 func (p *SqliteParser) MaybeConstraintName() *ast.ConstraintName {
@@ -811,14 +783,10 @@ func (p *SqliteParser) MaybeConflictClause() *ast.ConflictClause {
 			p.ReportError(
 				report.NewReport("parse error").
 					WithLocation(p.Current().FileLoc).
-					WithLabels([]report.Label{
-						{
-							Source: p.Current().SourceCode,
-							Range:  p.Current().SourceRange,
-							Note:   "expected 'rollback', 'abort', 'fail', 'ignore' or 'replace'",
-						},
-					}).
-					WithMessage(fmt.Sprintf("got '%s'", p.Current().Text)),
+					WithLabels(
+						report.LabelFromToken(p.Current(), "expected 'rollback', 'abort', 'fail', 'ignore' or 'replace'"),
+					).
+					WithNotes(fmt.Sprintf("got '%s'", p.Current().Text)),
 			)
 			return nil
 		}

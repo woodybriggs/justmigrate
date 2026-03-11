@@ -78,29 +78,25 @@ func (p *Parser) Expect(kind tik.TokenKind) tik.Token {
 	if ok {
 		p.ReportError(
 			report.
-				NewReport("parse error").
-				WithLabels([]report.Label{
-					{
-						Source: p.currentToken.SourceCode,
-						Range:  p.currentToken.SourceRange,
-						Note:   fmt.Sprintf("expected '%s' got '%s'", kind.DebugString(), p.currentToken.DebugString()),
-					},
-				}).
+				NewReport(
+					"parse error",
+				).
+				WithLabels(
+					report.LabelFromToken(p.currentToken, fmt.Sprintf("expected '%s' got '%s'", kind.DebugString(), p.currentToken.DebugString())),
+				).
 				WithNotes(
-					[]string{fmt.Sprintf("attempting to parse %s", parseContext.Name)},
+					fmt.Sprintf("attempting to parse %s", parseContext.Name),
 				),
 		)
 	} else {
 		p.ReportError(
 			report.
-				NewReport("parse error").
-				WithLabels([]report.Label{
-					{
-						Source: p.currentToken.SourceCode,
-						Range:  p.currentToken.SourceRange,
-						Note:   fmt.Sprintf("expected '%s' got '%s'", kind.DebugString(), p.currentToken.DebugString()),
-					},
-				}),
+				NewReport(
+					"parse error",
+				).
+				WithLabels(
+					report.LabelFromToken(p.currentToken, fmt.Sprintf("expected '%s' got '%s'", kind.DebugString(), p.currentToken.DebugString())),
+				),
 		)
 	}
 

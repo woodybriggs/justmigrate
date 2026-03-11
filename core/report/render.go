@@ -25,86 +25,116 @@ type renderLine struct {
 }
 
 func (r *Renderer) Render(report Report) string {
-	var sb strings.Builder
-
+	var out strings.Builder
+	var tmp strings.Builder
 	// header
-	fmt.Fprintf(&sb, "%s[%04d]: %s\n", report.Kind, report.Code, report.Message)
+	fmt.Fprintf(&out, " ┌─ %s\n", report.Kind)
+	fmt.Fprintf(&out, " │\n")
 
-	if len(report.Labels) == 0 {
-		return sb.String()
-	}
+	// labels can be from different sources, so we group
+	// labels by source and then find the source range.
+	type SourceCodeFileName string
+	sources := map[SourceCodeFileName]*luther.SourceCode{}
+	orderSource := []SourceCodeFileName{}
+	sourceLabels := map[SourceCodeFileName][]*Label{}
+	sourceLines := map[SourceCodeFileName][]LineInfo{}
 
-	source := report.Labels[0].Source
-	labelsRange := tik.TextRange{
-		Start: math.MaxInt,
-		End:   math.MinInt,
-	}
-	for _, label := range report.Labels {
-		labelsRange.Start = min(labelsRange.Start, label.Range.Start)
-		labelsRange.End = max(labelsRange.End, label.Range.End)
-		source = label.Source
-	}
-
-	srcLines := r.getLinesInRange(source, labelsRange)
-	if len(srcLines) == 0 {
-		return sb.String()
-	}
-
-	// prepare annotations
-	annotations := make(map[int][]string)
-	for _, label := range report.Labels {
-		info := rangeToLineInfo(source, label.Range)
-		caret := strings.Repeat(" ", info.Col) + "^"
-		length := label.Range.End - label.Range.Start
-		if length > 1 {
-			caret += strings.Repeat("^", length-1)
+	// group the labels up
+	for i := range report.Labels {
+		filename := SourceCodeFileName(report.Labels[i].Source.FileName)
+		if _, ok := sources[filename]; !ok {
+			orderSource = append(orderSource, filename)
+			sources[filename] = &report.Labels[i].Source
 		}
-		if label.Note != "" {
-			caret += " " + label.Note
-		}
-		annotations[info.Line] = append(annotations[info.Line], caret)
+		sourceLabels[filename] = append(sourceLabels[filename], &report.Labels[i])
 	}
 
-	// build canvas
+	// get the source lines from the labels
+	for sourceFileName, labels := range sourceLabels {
+		start := math.MaxInt
+		end := math.MinInt
+
+		for _, label := range labels {
+			start = min(start, label.Range.Start)
+			end = max(end, label.Range.End)
+		}
+
+		sourceLines[sourceFileName] = r.getLinesInRange(*sources[sourceFileName], tik.TextRange{
+			Start: start,
+			End:   end,
+		})
+	}
+
 	var canvas []renderLine
-	for _, li := range srcLines {
-		canvas = append(canvas, renderLine{LineNum: li.Line, Content: li.Content, IsSrc: true})
-		if notes, ok := annotations[li.Line]; ok {
-			for _, note := range notes {
-				canvas = append(canvas, renderLine{LineNum: 0, Content: note, IsSrc: false})
+
+	for _, filename := range orderSource {
+		source, _ := sources[filename]
+		labels, _ := sourceLabels[filename]
+		srcLines, _ := sourceLines[filename]
+
+		annotations := make(map[int][]string)
+		for _, label := range labels {
+			tmp.Reset()
+			// get the line info
+			info := rangeToLineInfo(*source, label.Range)
+
+			// pad the start of the line with spaces up to the beginning of the label range
+			fmt.Fprint(&tmp, strings.Repeat(" ", info.Col))
+
+			// add '^' across the label range
+			fmt.Fprintf(&tmp, "└")
+			for range label.Range.End - label.Range.Start - 2 {
+				fmt.Fprint(&tmp, "─")
+			}
+			fmt.Fprintf(&tmp, "┴─")
+
+			// add the note to the end
+			fmt.Fprintf(&tmp, " %s", label.Note)
+			annotations[info.Line] = append(annotations[info.Line], tmp.String())
+		}
+
+		maxLine := srcLines[len(srcLines)-1].Line
+		r.gutterWidth = len(fmt.Sprintf("%d", maxLine)) + 1
+
+		canvas = append(canvas, renderLine{LineNum: 0, Content: fmt.Sprintf("%s", filename)})
+
+		for _, li := range srcLines {
+			canvas = append(canvas, renderLine{LineNum: li.Line, Content: li.Content, IsSrc: true})
+			if notes, ok := annotations[li.Line]; ok {
+				for _, note := range notes {
+					canvas = append(canvas, renderLine{LineNum: 0, Content: note, IsSrc: false})
+				}
+			}
+		}
+
+		fmt.Fprintf(&out, " ├─ %s:%d:%d\n", report.Location.FileName, report.Location.Line, report.Location.Col)
+		fmt.Fprintf(&out, " │\n")
+		if report.Message != "" {
+			fmt.Fprintf(&out, " │%s %s\n", r.inGutter("•"), report.Message)
+		}
+		if len(report.Notes) > 0 {
+			for _, note := range report.Notes {
+				fmt.Fprintf(&out, " │%s %s\n", r.inGutter(""), note)
+			}
+			fmt.Fprintf(&out, " │\n")
+		}
+		for i, row := range canvas {
+			if i == 0 {
+				fmt.Fprintf(&out, " │%s ┌─ %s\n", r.inGutter(""), row.Content)
+				fmt.Fprintf(&out, " │%s │\n", r.inGutter(""))
+				continue
+			}
+			if row.IsSrc {
+				fmt.Fprintf(&out, " │%s │ ", r.inGutter(fmt.Sprint(row.LineNum)))
+				syntaxHighlight(&out, row, nil)
+				fmt.Fprint(&out, "\n")
+			} else {
+				fmt.Fprintf(&out, " ┆%s ┆ %s\n", r.inGutter(""), row.Content)
 			}
 		}
 	}
 
-	// calculate gutter
-	maxLine := srcLines[len(srcLines)-1].Line
-	r.gutterWidth = len(fmt.Sprintf("%d", maxLine)) + 1
-
-	// render
-	if report.Location.FileName != "" {
-		fmt.Fprintf(&sb, "%s ┌─ %s:%d:%d\n", r.inGutter(""), report.Location.FileName, report.Location.Line, report.Location.Col)
-	}
-	fmt.Fprintf(&sb, "%s │\n", r.inGutter(""))
-
-	for _, row := range canvas {
-		if row.IsSrc {
-			fmt.Fprintf(&sb, "%s │ ", r.inGutter(fmt.Sprint(row.LineNum)))
-			syntaxHighlight(&sb, row)
-			fmt.Fprint(&sb, "\n")
-		} else {
-			fmt.Fprintf(&sb, "%s │ %s\n", r.inGutter(""), row.Content)
-		}
-	}
-
-	// global notes
-	if len(report.Notes) > 0 {
-		fmt.Fprintf(&sb, "%s │\n", r.inGutter(""))
-		for _, note := range report.Notes {
-			fmt.Fprintf(&sb, "%s = note: %s\n", r.inGutter(""), note)
-		}
-	}
-
-	return sb.String()
+	return out.String()
 }
 
 func (r *Renderer) inGutter(s string) string {
@@ -150,9 +180,7 @@ func rangeToLineInfo(src luther.SourceCode, tr tik.TextRange) LineInfo {
 	currentLine := 1
 	lineStartOffset := 0
 
-	lines := strings.Split(string(src.Raw), "\n")
-
-	for _, content := range lines {
+	for content := range strings.SplitSeq(string(src.Raw), "\n") {
 		lineEndOffset := lineStartOffset + len([]rune(content))
 
 		// Check if the start of the range falls within the current line's character offsets.

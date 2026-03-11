@@ -2,20 +2,41 @@ package ast
 
 import (
 	"maps"
-	"slices"
+	"reflect"
 )
 
-type Equalable[T any] interface {
-	Eq(other T) bool
+type Equalable interface {
+	Eq(otherAny any) bool
 }
 
-func CheckPtr[T Equalable[T]](a, b T) bool {
-	aIsNil := any(a) == nil
-	bIsNil := any(b) == nil
+func As[T any](input any) (*T, bool) {
+	if input == nil {
+		return nil, false
+	}
+
+	switch t := input.(type) {
+	case *T:
+		return t, true
+	case T:
+		return &t, true
+	default:
+		return nil, false
+	}
+}
+
+func CheckPtr(a, b Equalable) bool {
+
+	if a == nil && b == nil {
+		return true
+	}
+
+	aIsNil := a == nil || (reflect.ValueOf(a).Kind() == reflect.Ptr && reflect.ValueOf(a).IsNil())
+	bIsNil := b == nil || (reflect.ValueOf(b).Kind() == reflect.Ptr && reflect.ValueOf(b).IsNil())
 
 	if aIsNil && bIsNil {
 		return true
 	}
+
 	if aIsNil || bIsNil {
 		return false
 	}
@@ -23,16 +44,33 @@ func CheckPtr[T Equalable[T]](a, b T) bool {
 	return a.Eq(b)
 }
 
-func Check[T Equalable[T]](a, b T) bool {
+func Check(a, b Equalable) bool {
 	return a.Eq(b)
 }
 
-func (node *CreateIndex) Eq(otherStatement Statement) bool {
+func (node *Identifier) Eq(otherAny any) bool {
+	other, ok := As[Identifier](otherAny)
+	if !ok {
+		return false
+	}
+
+	if node.Text != other.Text {
+		return false
+	}
+
+	return true
+}
+
+func (node *ParseError) Eq(otherAny any) bool {
 	return false
 }
 
-func (node *DropTable) Eq(otherStatement Statement) bool {
-	other, ok := otherStatement.(*DropTable)
+func (node *CreateIndex) Eq(otherAny any) bool {
+	return false
+}
+
+func (node *DropTable) Eq(otherAny any) bool {
+	other, ok := As[DropTable](otherAny)
 	if !ok {
 		return false
 	}
@@ -40,8 +78,8 @@ func (node *DropTable) Eq(otherStatement Statement) bool {
 	return Check(&node.TableIdentifier, &other.TableIdentifier)
 }
 
-func (node *AlterTable) Eq(otherStatement Statement) bool {
-	other, ok := otherStatement.(*AlterTable)
+func (node *AlterTable) Eq(otherAny any) bool {
+	other, ok := As[AlterTable](otherAny)
 	if !ok {
 		return false
 	}
@@ -57,17 +95,17 @@ func (node *AlterTable) Eq(otherStatement Statement) bool {
 	return true
 }
 
-func (node *DropColumn) Eq(otherAlteration TableAlteration) bool {
-	other, ok := otherAlteration.(*DropColumn)
+func (node *DropColumn) Eq(otherAny any) bool {
+	other, ok := As[DropColumn](otherAny)
 	if !ok {
 		return false
 	}
 
-	return Check(node.ColumnName.AsExpr(), other.ColumnName.AsExpr())
+	return Check(&node.ColumnName, &other.ColumnName)
 }
 
-func (node *AddColumn) Eq(otherAlteration TableAlteration) bool {
-	other, ok := otherAlteration.(*AddColumn)
+func (node *AddColumn) Eq(otherAny any) bool {
+	other, ok := As[AddColumn](otherAny)
 	if !ok {
 		return false
 	}
@@ -75,8 +113,8 @@ func (node *AddColumn) Eq(otherAlteration TableAlteration) bool {
 	return Check(&node.ColumnDefinition, &other.ColumnDefinition)
 }
 
-func (node *CreateTable) Eq(otherStatement Statement) bool {
-	other, ok := otherStatement.(*CreateTable)
+func (node *CreateTable) Eq(otherAny any) bool {
+	other, ok := As[CreateTable](otherAny)
 	if !ok {
 		return false
 	}
@@ -96,25 +134,34 @@ func (node *CreateTable) Eq(otherStatement Statement) bool {
 	return true
 }
 
-func (node *CatalogObjectIdentifier) Eq(other *CatalogObjectIdentifier) bool {
+func (node *CatalogObjectIdentifier) Eq(otherAny any) bool {
 
-	if other == nil {
+	if node == nil || otherAny == nil {
 		return false
 	}
 
-	result := true
-	if node.SchemaName != nil && other.SchemaName != nil {
-		result = result && node.SchemaName.Eq(other.SchemaName.AsExpr())
-	} else if node.SchemaName != nil || other.SchemaName != nil {
+	other, ok := As[CatalogObjectIdentifier](otherAny)
+	if !ok {
 		return false
 	}
 
-	result = result && node.ObjectName.Eq(other.ObjectName.AsExpr())
+	if !CheckPtr(node.SchemaName, other.SchemaName) {
+		return false
+	}
 
-	return result
+	if !Check(&node.ObjectName, &other.ObjectName) {
+		return false
+	}
+
+	return true
 }
 
-func (node *TableDefinition) Eq(other *TableDefinition) bool {
+func (node *TableDefinition) Eq(otherAny any) bool {
+
+	other, ok := As[TableDefinition](otherAny)
+	if !ok {
+		return false
+	}
 
 	if len(node.ColumnDefinitions) != len(other.ColumnDefinitions) {
 		return false
@@ -126,8 +173,7 @@ func (node *TableDefinition) Eq(other *TableDefinition) bool {
 
 	result := true
 	for i := range len(node.ColumnDefinitions) {
-		a, b := node.ColumnDefinitions[i], other.ColumnDefinitions[i]
-		result = result && a.Eq(&b)
+		result = result && Check(&node.ColumnDefinitions[i], &other.ColumnDefinitions[i])
 	}
 
 	if result == false {
@@ -135,14 +181,19 @@ func (node *TableDefinition) Eq(other *TableDefinition) bool {
 	}
 
 	for i := range len(node.TableConstraints) {
-		a, b := node.TableConstraints[i], other.TableConstraints[i]
-		result = result && a.Eq(b)
+		result = result && Check(node.TableConstraints[i], other.TableConstraints[i])
 	}
 
 	return result
 }
-func (node *ColumnDefinition) Eq(other *ColumnDefinition) bool {
-	if !Check(node.ColumnName.AsExpr(), other.ColumnName.AsExpr()) {
+func (node *ColumnDefinition) Eq(otherAny any) bool {
+
+	other, ok := As[ColumnDefinition](otherAny)
+	if !ok {
+		return false
+	}
+
+	if !Check(&node.ColumnName, &other.ColumnName) {
 		return false
 	}
 
@@ -156,74 +207,79 @@ func (node *ColumnDefinition) Eq(other *ColumnDefinition) bool {
 
 	result := true
 	for i := range node.ColumnConstraints {
-		a, b := node.ColumnConstraints[i], other.ColumnConstraints[i]
-		result = result && a.Eq(b)
+		result = result && Check(node.ColumnConstraints[i], other.ColumnConstraints[i])
 	}
 	return result
 }
 
-func (node *TypeName) Eq(other *TypeName) bool {
-	if !node.Name.Eq(other.Name.AsExpr()) {
-		return false
-	}
-	return true
-}
-func (node *ConflictClause) Eq(other *ConflictClause) bool {
-	return node.Action.Eq(&other.Action)
-}
-
-func (node *TableConstraint_Check) Eq(other TableConstraint) bool {
-
-	if otherCheck, ok := other.(*TableConstraint_Check); ok {
-		// Assume that named constraints are equivilent
-		if node.Name.Eq(otherCheck.Name) {
-			return true
-		}
-
-		// Otherwise we need to know if the Expression is "equivilent"
-		return node.Expr.Eq(otherCheck.Expr)
-	}
-
-	return true
-}
-
-func (node *TableConstraint_PrimaryKey) Eq(other TableConstraint) bool {
-	if other, ok := other.(*TableConstraint_PrimaryKey); ok {
-
-		if len(node.IndexedColumns) != len(other.IndexedColumns) {
-			return false
-		}
-
-		result := true
-		if node.Name != nil && other.Name != nil {
-			result = result && node.Name.Eq(other.Name)
-		} else if node.Name != nil || other.Name != nil {
-			return false
-		}
-
-		for i, column := range node.IndexedColumns {
-			otherColumn := &other.IndexedColumns[i]
-			result = result && column.Eq(otherColumn)
-		}
-
-		if node.ConflictClause != nil && other.ConflictClause != nil {
-			result = result && node.ConflictClause.Eq(other.ConflictClause)
-		} else if node.ConflictClause != nil || other.ConflictClause != nil {
-			return false
-		}
-
-		return true
-	}
-	return false
-}
-
-func (node *TableConstraint_ForeignKey) Eq(otherTableConstraint TableConstraint) bool {
-	other, ok := otherTableConstraint.(*TableConstraint_ForeignKey)
+func (node *TypeName) Eq(otherAny any) bool {
+	other, ok := As[TypeName](otherAny)
 	if !ok {
 		return false
 	}
 
-	if !CheckPtr(node.Name, other.Name) {
+	if !Check(&node.Name, &other.Name) {
+		return false
+	}
+
+	if !CheckPtr(node.Arg0, other.Arg0) {
+		return false
+	}
+
+	if !CheckPtr(node.Arg1, other.Arg1) {
+		return false
+	}
+
+	return true
+}
+func (node *ConflictClause) Eq(otherAny any) bool {
+	other, ok := As[ConflictClause](otherAny)
+	if !ok {
+		return false
+	}
+	return Check(&node.Action, &other.Action)
+}
+
+func (node *TableConstraint_Check) Eq(otherAny any) bool {
+	other, ok := As[TableConstraint_Check](otherAny)
+	if !ok {
+		return false
+	}
+
+	return Check(node.Expr, other.Expr)
+}
+
+func (node *TableConstraint_PrimaryKey) Eq(otherAny any) bool {
+	other, ok := As[TableConstraint_PrimaryKey](otherAny)
+	if !ok {
+		return false
+	}
+
+	// assume that named constraints are the same
+	if CheckPtr(node.Name, other.Name) {
+		return false
+	}
+
+	if len(node.IndexedColumns) != len(other.IndexedColumns) {
+		return false
+	}
+
+	for i := range len(node.IndexedColumns) {
+		if !Check(&node.IndexedColumns[i], &other.IndexedColumns[i]) {
+			return false
+		}
+	}
+
+	if !CheckPtr(node.ConflictClause, other.ConflictClause) {
+		return false
+	}
+
+	return true
+}
+
+func (node *TableConstraint_ForeignKey) Eq(otherAny any) bool {
+	other, ok := As[TableConstraint_ForeignKey](otherAny)
+	if !ok {
 		return false
 	}
 
@@ -234,19 +290,24 @@ func (node *TableConstraint_ForeignKey) Eq(otherTableConstraint TableConstraint)
 		return false
 	}
 
-	result := true
-
 	for i := range len(thisPairs) {
-		thisPair, otherPair := thisPairs[i], otherPairs[i]
-		result = result && thisPair.Eq(otherPair)
+		if !Check(&thisPairs[i], &otherPairs[i]) {
+			return false
+		}
 	}
 
-	result = result && node.FkClause.Eq(&other.FkClause)
-	return result
+	if !Check(&node.FkClause, &other.FkClause) {
+		return false
+	}
+
+	return true
 }
 
-func (node *IndexedColumn) Eq(other *IndexedColumn) bool {
-	result := true
+func (node *IndexedColumn) Eq(otherAny any) bool {
+	other, ok := As[IndexedColumn](otherAny)
+	if !ok {
+		return false
+	}
 
 	if !CheckPtr(node.Subject, other.Subject) {
 		return false
@@ -264,10 +325,16 @@ func (node *IndexedColumn) Eq(other *IndexedColumn) bool {
 		return false
 	}
 
-	return result
+	return true
 }
 
-func (node *ForeignKeyClause) Eq(other *ForeignKeyClause) bool {
+func (node *ForeignKeyClause) Eq(otherAny any) bool {
+
+	other, ok := As[ForeignKeyClause](otherAny)
+	if !ok {
+		return false
+	}
+
 	if len(node.ForeignColumns) != len(other.ForeignColumns) {
 		return false
 	}
@@ -275,79 +342,84 @@ func (node *ForeignKeyClause) Eq(other *ForeignKeyClause) bool {
 		return false
 	}
 
-	result := true
-	result = result && node.ForeignTable.Eq(&other.ForeignTable)
-
-	cmp := func(a, b Identifier) int {
-		if a.Text < b.Text {
-			return -1
-		}
-		if a.Text > b.Text {
-			return 1
-		}
-		return 0
-	}
-
-	aCols := slices.SortedFunc(slices.Values(node.ForeignColumns), cmp)
-	bCols := slices.SortedFunc(slices.Values(other.ForeignColumns), cmp)
-
-	for i, foreignCol := range aCols {
-		result = result && foreignCol.Eq(bCols[i].AsExpr())
-	}
-
-	return result
-}
-
-func (node *NoAction) Eq(other ForeignKeyActionDo) bool {
-	_, ok := other.(*NoAction)
-	return ok
-}
-
-func (node *Restrict) Eq(other ForeignKeyActionDo) bool {
-	_, ok := other.(*Restrict)
-	return ok
-}
-
-func (node *SetNull) Eq(other ForeignKeyActionDo) bool {
-	_, ok := other.(*SetNull)
-	return ok
-}
-
-func (node *SetDefault) Eq(other ForeignKeyActionDo) bool {
-	_, ok := other.(*SetDefault)
-	return ok
-}
-
-func (node *Cascade) Eq(other ForeignKeyActionDo) bool {
-	_, ok := other.(*Cascade)
-	return ok
-}
-
-func (node *ConstraintName) Eq(other *ConstraintName) bool {
-	if node == nil || other == nil {
+	if !Check(&node.ForeignTable, &other.ForeignTable) {
 		return false
 	}
-	return CheckPtr(node.Name.AsExpr(), other.Name.AsExpr())
+
+	if !Check(IdentifierList(node.ForeignColumns).ToSet(), IdentifierList(other.ForeignColumns).ToSet()) {
+		return false
+	}
+
+	return true
 }
 
-func (node *ColumnConstraint_PrimaryKey) Eq(other ColumnConstraint) bool {
-	if other, ok := other.(*ColumnConstraint_PrimaryKey); ok {
-		result := true
+func (node *NoAction) Eq(otherAny any) bool {
+	_, ok := As[NoAction](otherAny)
+	return ok
+}
 
-		if node.Name != nil && other.Name != nil {
-			result = result && node.Name.Eq(other.Name)
-		} else if node.Name != nil || other.Name != nil {
-			return false
-		}
+func (node *Restrict) Eq(otherAny any) bool {
+	_, ok := As[Restrict](otherAny)
+	return ok
+}
 
-		return result
+func (node *SetNull) Eq(otherAny any) bool {
+	_, ok := As[SetNull](otherAny)
+	return ok
+}
+
+func (node *SetDefault) Eq(otherAny any) bool {
+	_, ok := As[SetDefault](otherAny)
+	return ok
+}
+
+func (node *Cascade) Eq(otherAny any) bool {
+	_, ok := As[Cascade](otherAny)
+	return ok
+}
+
+func (node *ConstraintName) Eq(otherAny any) bool {
+	other, ok := As[ConstraintName](otherAny)
+	if !ok {
+		return false
 	}
-	return false
+
+	if !CheckPtr(&node.Name, &other.Name) {
+		return false
+	}
+
+	return true
+}
+
+func (node *ColumnConstraint_PrimaryKey) Eq(otherAny any) bool {
+	other, ok := As[ColumnConstraint_PrimaryKey](otherAny)
+	if !ok {
+		return false
+	}
+
+	if !CheckPtr(node.Order, other.Order) {
+		return false
+	}
+
+	if !CheckPtr(node.AutoIncrement, other.AutoIncrement) {
+		return false
+	}
+
+	if !CheckPtr(node.ConflictClause, other.ConflictClause) {
+		return false
+	}
+
+	return true
 }
 
 type IdentifierSet map[string]struct{}
 
-func (this IdentifierSet) Eq(other IdentifierSet) bool {
+func (this IdentifierSet) Eq(otherAny any) bool {
+
+	other, ok := otherAny.(IdentifierSet)
+	if !ok {
+		return false
+	}
 
 	if len(this) != len(other) {
 		return false
@@ -372,8 +444,8 @@ func (l IdentifierList) ToSet() (result IdentifierSet) {
 	return result
 }
 
-func (node *ColumnConstraint_ForeignKey) Eq(otherConstraint ColumnConstraint) bool {
-	other, ok := otherConstraint.(*ColumnConstraint_ForeignKey)
+func (node *ColumnConstraint_ForeignKey) Eq(otherAny any) bool {
+	other, ok := As[ColumnConstraint_ForeignKey](otherAny)
 	if !ok {
 		return false
 	}
@@ -393,25 +465,19 @@ func (node *ColumnConstraint_ForeignKey) Eq(otherConstraint ColumnConstraint) bo
 		return false
 	}
 
-	if !CheckPtr(
-		node.FkClause.MatchName.AsExpr(),
-		other.FkClause.MatchName.AsExpr(),
-	) {
+	if !CheckPtr(node.FkClause.MatchName, other.FkClause.MatchName) {
 		return false
 	}
 
-	if !CheckPtr(
-		node.FkClause.Deferrable,
-		other.FkClause.Deferrable,
-	) {
+	if !CheckPtr(node.FkClause.Deferrable, other.FkClause.Deferrable) {
 		return false
 	}
 
 	return true
 }
 
-func (node *ColumnConstraint_NotNull) Eq(otherColumnConstraint ColumnConstraint) bool {
-	other, ok := otherColumnConstraint.(*ColumnConstraint_NotNull)
+func (node *ColumnConstraint_NotNull) Eq(otherAny any) bool {
+	other, ok := As[ColumnConstraint_NotNull](otherAny)
 	if !ok {
 		return false
 	}
@@ -419,8 +485,8 @@ func (node *ColumnConstraint_NotNull) Eq(otherColumnConstraint ColumnConstraint)
 	return CheckPtr(node.Name, other.Name)
 }
 
-func (node *ColumnConstraint_Default) Eq(otherColumnConstraint ColumnConstraint) bool {
-	other, ok := otherColumnConstraint.(*ColumnConstraint_Default)
+func (node *ColumnConstraint_Default) Eq(otherAny any) bool {
+	other, ok := As[ColumnConstraint_Default](otherAny)
 	if !ok {
 		return false
 	}
@@ -432,8 +498,8 @@ func (node *ColumnConstraint_Default) Eq(otherColumnConstraint ColumnConstraint)
 	return Check(node.Default, other.Default)
 }
 
-func (node *ColumnConstraint_Generated) Eq(otherColumnConstraint ColumnConstraint) bool {
-	other, ok := otherColumnConstraint.(*ColumnConstraint_Generated)
+func (node *ColumnConstraint_Generated) Eq(otherAny any) bool {
+	other, ok := As[ColumnConstraint_Generated](otherAny)
 	if !ok {
 		return false
 	}
@@ -449,8 +515,8 @@ func (node *ColumnConstraint_Generated) Eq(otherColumnConstraint ColumnConstrain
 	return true
 }
 
-func (node *ColumnConstraint_Check) Eq(otherColumnConstraint ColumnConstraint) bool {
-	other, ok := otherColumnConstraint.(*ColumnConstraint_Check)
+func (node *ColumnConstraint_Check) Eq(otherAny any) bool {
+	other, ok := As[ColumnConstraint_Check](otherAny)
 	if !ok {
 		return false
 	}
@@ -459,33 +525,33 @@ func (node *ColumnConstraint_Check) Eq(otherColumnConstraint ColumnConstraint) b
 		return false
 	}
 
-	return Check(node.CheckExpr, other.CheckExpr)
-}
-
-// @note(woody): fix up ^see above
-func (node *ColumnConstraint_Collate) Eq(other ColumnConstraint) bool {
-	if other, ok := other.(*ColumnConstraint_Collate); ok {
-		result := true
-
-		if node.Name != nil && other.Name != nil {
-			result = result && node.Name.Eq(other.Name)
-		} else if node.Name != nil || other.Name != nil {
-			return false
-		}
-
-		result = result && node.CollationName.Eq(other.CollationName.AsExpr())
-		return result
+	if !Check(node.CheckExpr, other.CheckExpr) {
+		return false
 	}
-	return false
+
+	return true
 }
 
-func (node *ColumnConstraint_Unique) Eq(other ColumnConstraint) bool {
-	_, ok := other.(*ColumnConstraint_Unique)
+func (node *ColumnConstraint_Collate) Eq(otherAny any) bool {
+	other, ok := As[ColumnConstraint_Collate](otherAny)
+	if !ok {
+		return false
+	}
+
+	if !Check(&node.CollationName, &other.CollationName) {
+		return false
+	}
+
+	return true
+}
+
+func (node *ColumnConstraint_Unique) Eq(otherAny any) bool {
+	_, ok := As[ColumnConstraint_Unique](otherAny)
 	return ok
 }
 
-func (node ExprList) Eq(otherExpr Expr) bool {
-	other, ok := otherExpr.(ExprList)
+func (node ExprList) Eq(otherAny any) bool {
+	other, ok := otherAny.(ExprList)
 	if !ok {
 		return false
 	}
@@ -494,42 +560,66 @@ func (node ExprList) Eq(otherExpr Expr) bool {
 		return false
 	}
 
-	result := true
 	for i := range len(node) {
-		a, b := node[i], other[i]
-		result = result && a.Eq(b)
+		if !Check(node[i], other[i]) {
+			return false
+		}
 	}
 
-	return result
-}
-
-func (node *Keyword) Eq(other *Keyword) bool {
-
-	if node == nil && other == nil {
-		return true
-	}
-
-	if node != nil && other != nil {
-		return node.Kind == other.Kind
-	}
-
-	return false
-}
-
-func (node *Collation) Eq(other *Collation) bool {
-	if !Check(node.Name.AsExpr(), other.Name.AsExpr()) {
-		return false
-	}
 	return true
 }
 
-func (node WhenThen) Eq(other WhenThen) bool {
-	return Check(node.When, other.When) && Check(node.Then, other.Then)
+func (node *Keyword) Eq(otherAny any) bool {
+
+	other, ok := As[Keyword](otherAny)
+	if !ok {
+		return false
+	}
+
+	if node == nil || other == nil {
+		return false
+	}
+
+	if node.Text != other.Text {
+		return false
+	}
+
+	return true
 }
 
-func (node *CaseExpression) Eq(otherExpr Expr) bool {
+func (node *Collation) Eq(otherAny any) bool {
+	other, ok := As[Collation](otherAny)
+	if !ok {
+		return false
+	}
 
-	other, ok := otherExpr.(*CaseExpression)
+	if !Check(&node.Name, &other.Name) {
+		return false
+	}
+
+	return true
+}
+
+func (node WhenThen) Eq(otherAny any) bool {
+	other, ok := otherAny.(WhenThen)
+	if !ok {
+		return false
+	}
+
+	if !Check(node.When, other.When) {
+		return false
+	}
+
+	if !Check(node.Then, other.Then) {
+		return false
+	}
+
+	return true
+}
+
+func (node *CaseExpression) Eq(otherAny any) bool {
+
+	other, ok := As[CaseExpression](otherAny)
 	if !ok {
 		return false
 	}
@@ -546,16 +636,16 @@ func (node *CaseExpression) Eq(otherExpr Expr) bool {
 		return false
 	}
 
-	result := true
 	for i := range len(node.Cases) {
-		a, b := node.Cases[i], other.Cases[i]
-		result = result && a.Eq(b)
+		if !Check(node.Cases[i], other.Cases[i]) {
+			return false
+		}
 	}
 	return true
 }
 
-func (node *BinaryOp) Eq(otherExpr Expr) bool {
-	other, ok := otherExpr.(*BinaryOp)
+func (node *BinaryOp) Eq(otherAny any) bool {
+	other, ok := As[BinaryOp](otherAny)
 	if !ok {
 		return false
 	}
@@ -564,33 +654,45 @@ func (node *BinaryOp) Eq(otherExpr Expr) bool {
 		return false
 	}
 
-	return Check(node.Lhs, other.Lhs) && Check(node.Rhs, other.Rhs)
+	if !Check(node.Lhs, other.Lhs) {
+		return false
+	}
+
+	if !Check(node.Rhs, other.Rhs) {
+		return false
+	}
+
+	return true
 }
 
-func (node *ColumnName) Eq(otherExpr Expr) bool {
-	other, ok := otherExpr.(*ColumnName)
+func (node *ColumnName) Eq(otherAny any) bool {
+	other, ok := As[ColumnName](otherAny)
 	if !ok {
 		return false
 	}
 
-	if !CheckPtr(node.Schema.AsExpr(), other.Schema.AsExpr()) {
+	if !CheckPtr(node.Schema, other.Schema) {
 		return false
 	}
 
-	if !CheckPtr(node.Table.AsExpr(), other.Schema.AsExpr()) {
+	if !CheckPtr(node.Table, other.Schema) {
 		return false
 	}
 
-	return Check(node.Column.AsExpr(), other.Column.AsExpr())
+	if !Check(&node.Column, &other.Column) {
+		return false
+	}
+
+	return true
 }
 
-func (node *FunctionCall) Eq(otherExpr Expr) bool {
-	other, ok := otherExpr.(*FunctionCall)
+func (node *FunctionCall) Eq(otherAny any) bool {
+	other, ok := As[FunctionCall](otherAny)
 	if !ok {
 		return false
 	}
 
-	if !Check(node.Name.AsExpr(), other.Name.AsExpr()) {
+	if !Check(&node.Name, &other.Name) {
 		return false
 	}
 
@@ -598,80 +700,125 @@ func (node *FunctionCall) Eq(otherExpr Expr) bool {
 		return false
 	}
 
-	return node.Args.Eq(other.Args)
+	if !Check(node.Args, other.Args) {
+		return false
+	}
+
+	return true
 }
 
-func (node *LiteralString) Eq(otherExpr Expr) bool {
-	other, ok := otherExpr.(*LiteralString)
+func (node *LiteralString) Eq(otherAny any) bool {
+	other, ok := As[LiteralString](otherAny)
 	if !ok {
 		return false
 	}
 	return node.Value == other.Value
 }
 
-func (node *LiteralFloat) Eq(other Expr) bool {
-	if otherFloat, ok := other.(*LiteralFloat); ok {
+func (node *LiteralFloat) Eq(otherAny any) bool {
+	other, ok := As[LiteralFloat](otherAny)
+	if !ok {
 		// we check the text value here as to not compare floats.
-		return otherFloat.Token.Text == node.Token.Text
+		return false
 	}
-	return false
+	return other.Token.Text == node.Token.Text
 }
 
-func (node *LiteralSignedInteger) Eq(other Expr) bool {
-	if otherNumber, ok := other.(*LiteralSignedInteger); ok {
-		return otherNumber.Token.Text == node.Token.Text
-	}
-	return false
-}
-
-func (node *LiteralUnsignedInteger) Eq(other Expr) bool {
-	if otherNumber, ok := other.(*LiteralUnsignedInteger); ok {
-		return otherNumber.Value == node.Value
-	}
-
-	return false
-}
-
-func (node *LiteralBoolean) Eq(other Expr) bool {
-	if otherBool, ok := other.(*LiteralBoolean); ok {
-		return node.Value == otherBool.Value
-	}
-	return false
-}
-
-func (node *LiteralNull) Eq(other Expr) bool {
-	if _, ok := other.(*LiteralNull); ok {
-		return true
-	}
-	return false
-}
-
-func (this IdentifierPair) Eq(other IdentifierPair) bool {
-	return this.A.Eq(other.A.AsExpr()) && this.B.Eq(other.B.AsExpr())
-}
-
-func (node *ForeignKeyDeleteAction) Eq(otherFkAction ForeignKeyAction) bool {
-	other, ok := otherFkAction.(*ForeignKeyDeleteAction)
+func (node *LiteralSignedInteger) Eq(otherAny any) bool {
+	other, ok := As[LiteralSignedInteger](otherAny)
 	if !ok {
 		return false
 	}
 
-	return Check(node.Action, other.Action)
+	if node.Value != other.Value {
+		return false
+	}
+
+	return true
 }
 
-func (node *ForeignKeyUpdateAction) Eq(otherFkAction ForeignKeyAction) bool {
-	other, ok := otherFkAction.(*ForeignKeyUpdateAction)
+func (node *LiteralUnsignedInteger) Eq(otherAny any) bool {
+	other, ok := As[LiteralUnsignedInteger](otherAny)
 	if !ok {
 		return false
 	}
 
-	return Check(node.Action, other.Action)
+	if node.Value != other.Value {
+		return false
+	}
+
+	return true
 }
 
-func (node *ForeignKeyDeferrable) Eq(other *ForeignKeyDeferrable) bool {
+func (node *LiteralBoolean) Eq(otherAny any) bool {
+	other, ok := As[LiteralBoolean](otherAny)
+	if !ok {
+		return false
+	}
+
+	if node.Value != other.Value {
+		return false
+	}
+
+	return true
+}
+
+func (node *LiteralNull) Eq(otherAny any) bool {
+	_, ok := As[LiteralNull](otherAny)
+	return ok
+}
+
+func (this IdentifierPair) Eq(otherAny any) bool {
+	other, ok := otherAny.(IdentifierPair)
+	if !ok {
+		return false
+	}
+	if !Check(&this.A, &other.A) {
+		return false
+	}
+	if !Check(&this.B, &other.B) {
+		return false
+	}
+	return true
+}
+
+func (node *ForeignKeyDeleteAction) Eq(otherAny any) bool {
+	other, ok := As[ForeignKeyDeleteAction](otherAny)
+	if !ok {
+		return false
+	}
+
+	if !Check(node.Action, other.Action) {
+		return false
+	}
+
+	return true
+}
+
+func (node *ForeignKeyUpdateAction) Eq(otherAny any) bool {
+	other, ok := As[ForeignKeyUpdateAction](otherAny)
+	if !ok {
+		return false
+	}
+
+	if !Check(node.Action, other.Action) {
+		return false
+	}
+
+	return true
+}
+
+func (node *ForeignKeyDeferrable) Eq(otherAny any) bool {
+
+	other, ok := As[ForeignKeyDeferrable](otherAny)
+	if !ok {
+		return false
+	}
+
 	if !CheckPtr(node.NotKeyword, other.NotKeyword) {
 		return false
 	}
+
 	if !CheckPtr(node.InitiallyKeyword, other.InitiallyKeyword) {
 		return false
 	}
@@ -679,5 +826,6 @@ func (node *ForeignKeyDeferrable) Eq(other *ForeignKeyDeferrable) bool {
 	if !CheckPtr(node.Deferrable, other.Deferrable) {
 		return false
 	}
+
 	return true
 }

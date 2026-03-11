@@ -20,7 +20,6 @@ CREATE TABLE "billing_plan" (
 
 /* table: currencies */
 CREATE TABLE "currencies" (
-    -- "code" text PRIMARY KEY NOT NULL,
     "decimal_places" integer NOT NULL,
     "name" text NOT NULL, 
     "type" text NOT NULL

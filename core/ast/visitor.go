@@ -6,7 +6,7 @@ import (
 )
 
 type Visitor interface {
-	// VisitColumnConstraintForeignKey(*ColumnConstraint_ForeignKey)
+	VisitParseError(*ParseError)
 
 	VisitDropTable(*DropTable)
 
@@ -57,6 +57,10 @@ type Visitor interface {
 	VisitColumnDefinition(*ColumnDefinition)
 	VisitTypeName(*TypeName)
 	VisitCatalogObjectIdentifier(*CatalogObjectIdentifier)
+}
+
+func (node *ParseError) Accept(v Visitor) {
+	v.VisitParseError(node)
 }
 
 func (node *TypeName) Accept(v Visitor) {

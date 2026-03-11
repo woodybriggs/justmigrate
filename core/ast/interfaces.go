@@ -1,7 +1,7 @@
 package ast
 
 type Statement interface {
-	Equalable[Statement]
+	Equalable
 	Accept(Visitor)
 	nodeStatement()
 }
@@ -16,7 +16,7 @@ func (node *DropTable) nodeStatement()         {}
 func (node *CreateTrigger) nodeStatement()     {}
 
 type TableAlteration interface {
-	Equalable[TableAlteration]
+	Equalable
 	Accept(Visitor)
 	tableAlteration()
 }
@@ -27,7 +27,7 @@ func (node *DropColumn) tableAlteration() {}
 // func (node *CreateView) nodeStatement()        {}
 
 type TableConstraint interface {
-	Equalable[TableConstraint]
+	Equalable
 	Accept(Visitor)
 	nodeTableConstraint()
 }
@@ -35,9 +35,10 @@ type TableConstraint interface {
 func (node *TableConstraint_Check) nodeTableConstraint()      {}
 func (node *TableConstraint_PrimaryKey) nodeTableConstraint() {}
 func (node *TableConstraint_ForeignKey) nodeTableConstraint() {}
+func (node *ParseError) nodeTableConstraint()                 {}
 
 type ColumnConstraint interface {
-	Equalable[ColumnConstraint]
+	Equalable
 	Accept(Visitor)
 	nodeColumnConstraint()
 }
@@ -50,9 +51,10 @@ func (node *ColumnConstraint_Generated) nodeColumnConstraint()  {}
 func (node *ColumnConstraint_Check) nodeColumnConstraint()      {}
 func (node *ColumnConstraint_Unique) nodeColumnConstraint()     {}
 func (node *ColumnConstraint_Collate) nodeColumnConstraint()    {}
+func (node *ParseError) nodeColumnConstraint()                  {}
 
 type ForeignKeyAction interface {
-	Equalable[ForeignKeyAction]
+	Equalable
 	Accept(Visitor)
 	nodeForeignKeyAction()
 }
@@ -61,7 +63,7 @@ func (node *ForeignKeyDeleteAction) nodeForeignKeyAction() {}
 func (node *ForeignKeyUpdateAction) nodeForeignKeyAction() {}
 
 type ForeignKeyActionDo interface {
-	Equalable[ForeignKeyActionDo]
+	Equalable
 	Accept(Visitor)
 	nodeForeignKeyActionDo()
 }
@@ -73,7 +75,7 @@ func (node *SetDefault) nodeForeignKeyActionDo() {}
 func (node *Cascade) nodeForeignKeyActionDo()    {}
 
 type Expr interface {
-	Equalable[Expr]
+	Equalable
 	Accept(Visitor)
 	nodeExpression()
 }
@@ -90,8 +92,10 @@ func (node *LiteralSignedInteger) nodeExpression()   {}
 func (node *LiteralUnsignedInteger) nodeExpression() {}
 func (node *LiteralString) nodeExpression()          {}
 func (node *LiteralNull) nodeExpression()            {}
+func (node *ParseError) nodeExpression()             {}
 
 type NumericLiteral interface {
+	Equalable
 	nodeNumericLiteral()
 	Accept(Visitor)
 }

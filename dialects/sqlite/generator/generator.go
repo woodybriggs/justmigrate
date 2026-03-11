@@ -19,6 +19,8 @@ func NewSqliteFormatter(debug bool, formatter formatter.Formatter) *SqliteFormat
 	}
 }
 
+func (f *SqliteFormatter) VisitParseError(err *ast.ParseError) {}
+
 func (f *SqliteFormatter) Keyword(keyword string) {
 	f.Text(keyword)
 }

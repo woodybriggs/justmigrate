@@ -7,15 +7,29 @@ import (
 	"woodybriggs/justmigrate/core/tik"
 )
 
+type Theme struct {
+	IdentifierColor  Color
+	KeywordColor     Color
+	PunctuationColor Color
+	CommentColor     Color
+}
+
+var defaultTheme Theme = Theme{
+	IdentifierColor:  Color{r: 139, g: 195, b: 226},
+	KeywordColor:     Color{r: 86, g: 156, b: 214},
+	CommentColor:     Color{r: 105, g: 153, b: 85},
+	PunctuationColor: Color{r: 255, g: 255, b: 255},
+}
+
 type Color struct {
 	r, g, b, _ byte
 }
 
-func syntaxHighlight(w io.Writer, line renderLine) {
-	commentColor := Color{r: 0, g: 150, b: 0}
-	identifierColor := Color{r: 150, g: 250, b: 250}
-	keywordColor := Color{r: 0, g: 75, b: 200}
-	punctuationColor := Color{r: 255, g: 255, b: 255}
+func syntaxHighlight(w io.Writer, line renderLine, theme *Theme) {
+
+	if theme == nil {
+		theme = &defaultTheme
+	}
 
 	if !line.IsSrc {
 		fmt.Fprint(w, line.Content)
@@ -37,7 +51,7 @@ func syntaxHighlight(w io.Writer, line renderLine) {
 	tok := miniLex.NextToken()
 	if tok.Kind == tik.TokenKind_EOF && len(line.Content) != 0 {
 		// this must be a line comment
-		setForegroundColor(w, commentColor)
+		setForegroundColor(w, theme.CommentColor)
 		fmt.Fprint(w, line.Content)
 		resetColor(w)
 		return
@@ -46,27 +60,25 @@ func syntaxHighlight(w io.Writer, line renderLine) {
 	for tok.Kind != tik.TokenKind_EOF {
 		fmt.Fprint(w, tok.LeadingTrivia)
 		if tok.Kind > tik.TokenKindOffset_Keywords {
-			setForegroundColor(w, keywordColor)
+			setForegroundColor(w, theme.KeywordColor)
 			fmt.Fprint(w, tok.Text)
 			resetColor(w)
 		} else if tok.Kind == tik.TokenKind_Identifier {
-			setForegroundColor(w, identifierColor)
+			setForegroundColor(w, theme.IdentifierColor)
 			fmt.Fprint(w, tok.Quoted())
 			resetColor(w)
 		} else if tok.Kind < tik.TokenKindOffset_Atoms {
-			setForegroundColor(w, punctuationColor)
+			setForegroundColor(w, theme.PunctuationColor)
 			fmt.Fprint(w, tok.Text)
 			resetColor(w)
 		} else {
 			fmt.Fprint(w, tok.Text)
 		}
-		setForegroundColor(w, commentColor)
+		setForegroundColor(w, theme.CommentColor)
 		fmt.Fprint(w, tok.TrailingTrivia)
 		resetColor(w)
 		tok = miniLex.NextToken()
 	}
-
-	return
 }
 
 func setForegroundColor(w io.Writer, c Color) {

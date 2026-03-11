@@ -33,24 +33,14 @@ func (uce *MissingColumnsErr) Unwrap() []error {
 		err := report.NewReport("invalid foreign key").
 			WithLocation(col.FileLoc).
 			WithLabels(
-				[]report.Label{
-					{
-						Source: uce.Table.ObjectName.SourceCode,
-						Range:  uce.Table.ObjectName.SourceRange,
-						Note:   fmt.Sprintf("table missing column \"%s\"", col.Text),
-					},
-					{
-						Source: col.SourceCode,
-						Range:  col.SourceRange,
-						Note:   "column used here",
-					},
-				},
+				report.LabelFromIdentifier(uce.Table.ObjectName, fmt.Sprintf("table missing column \"%s\"", col.Text)),
+				report.LabelFromIdentifier(col, "column used here"),
 			).
 			WithMessage(fmt.Sprintf("\"%s\" does not exist on table \"%s\"", col.Text, uce.Table.ObjectName.Text)).
-			WithNotes([]string{
+			WithNotes(
 				"add the missing column to the table or",
 				"remove the foreign key constraint as well as the column",
-			})
+			)
 
 		errs = append(errs, err)
 	}
@@ -224,46 +214,27 @@ func (srf *ErrSchemaResolutionFailed) Unwrap() []error {
 	errs := []error{}
 
 	for _, table := range srf.MissingTables {
-
-		referencedSource := table.ReferencedBy.CreateKeyword.SourceCode
-		referencedRange := table.ReferencedBy.TableIdentifier.ObjectName.SourceRange
-
-		err := report.NewReport("foreign key").
+		err := report.
+			NewReport("invalid foreign key").
 			WithLocation(table.MissingTableIdentifier.ObjectName.FileLoc).
-			WithLabels([]report.Label{
-				{
-					Source: table.MissingTableIdentifier.ObjectName.SourceCode,
-					Range:  table.MissingTableIdentifier.ObjectName.SourceRange,
-					Note:   "this foreign table is missing",
-				},
-				{
-					Source: referencedSource,
-					Range:  referencedRange,
-					Note:   "foreign key",
-				},
-			})
-
+			WithLabels(
+				report.LabelFromIdentifier(table.MissingTableIdentifier.ObjectName, "this foreign table is missing"),
+				report.LabelFromIdentifier(table.ReferencedBy.TableIdentifier.ObjectName, "foreign key reference defined here"),
+			)
 		errs = append(errs, err)
 	}
 
 	for _, col := range srf.MissingColumns {
-		err := report.NewReport("invalid foreign key").
+		err := report.
+			NewReport("invalid foreign key").
 			WithLocation(col.MissingColumnIdentifier.FileLoc).
-			WithLabels([]report.Label{
-				{
-					Source: col.MissingColumnIdentifier.SourceCode,
-					Range:  col.MissingColumnIdentifier.SourceRange,
-					Note:   fmt.Sprintf("this column is missing in table \"%s\"", col.ReferencingTo.TableIdentifier.ObjectName.Text),
-				},
-				{
-					Source: col.ReferencingTo.TableIdentifier.ObjectName.SourceCode,
-					Range:  col.ReferencingTo.TableIdentifier.ObjectName.SourceRange,
-					Note:   fmt.Sprintf("this table is missing column \"%s\"", col.MissingColumnIdentifier.Text),
-				},
-			}).
-			WithNotes([]string{
+			WithLabels(
+				report.LabelFromIdentifier(col.MissingColumnIdentifier, fmt.Sprintf("this column is missing in table \"%s\"", col.ReferencingTo.TableIdentifier.ObjectName.Text)),
+				report.LabelFromIdentifier(col.ReferencingTo.TableIdentifier.ObjectName, fmt.Sprintf("this table is missing column \"%s\"", col.MissingColumnIdentifier.Text)),
+			).
+			WithNotes(
 				fmt.Sprintf("column \"%s\" does exist on the foreign key table \"%s\"", col.MissingColumnIdentifier.Text, col.ReferencingTo.TableIdentifier.ObjectName.Text),
-			})
+			)
 
 		errs = append(errs, err)
 	}
@@ -331,10 +302,9 @@ func validateColumnsExist(table *ast.CreateTable, idents ast.IdentifierList) (er
 
 	missingColumns := []ast.Identifier{}
 	for _, ident := range idents {
-		contained := slices.ContainsFunc(columns, func(item ast.Identifier) bool {
-			return ident.AsExpr().Eq(item.AsExpr())
-		})
-		if !contained {
+		if !slices.ContainsFunc(columns, func(item ast.Identifier) bool {
+			return ident.Eq(item)
+		}) {
 			missingColumns = append(missingColumns, ident)
 		}
 	}
@@ -351,23 +321,32 @@ func validateColumnsExist(table *ast.CreateTable, idents ast.IdentifierList) (er
 
 // validates that the local part of the foreign key
 // (the binding column) is actually present on the table
-func validateForeignKeyConstraintsLocal(t *ast.CreateTable) (errs error) {
+func validateForeignKeyConstraintsLocal(t *ast.CreateTable) error {
+
+	errs := []error{}
 
 	for _, constraint := range t.TableDefinition.TableConstraints {
-
-		switch c := constraint.(type) {
-		case *ast.TableConstraint_ForeignKey:
-			// check that the tables.columns in the fk actually exist
+		if c, ok := constraint.(*ast.TableConstraint_ForeignKey); ok {
 			err := validateColumnsExist(t, c.Columns)
 			if err != nil {
-				errs = errors.Join(err)
+				type multiError interface {
+					Error() string
+					Unwrap() []error
+				}
+				if er, ok := errors.AsType[multiError](err); ok {
+					for _, e := range er.Unwrap() {
+						errs = append(errs, e)
+					}
+				}
 			}
-		default:
-			continue
 		}
 	}
 
-	return
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	return nil
 }
 
 type TableValidationError struct {

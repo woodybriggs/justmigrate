@@ -142,7 +142,7 @@ func (gen *SqliteFormatter) Plan(src, tgt []ast.Statement, ops []diff.Op) ([]dif
 
 func dropColumn(table *ast.CreateTable, colName *ast.Identifier) {
 	indexOfCol := slices.IndexFunc(table.TableDefinition.ColumnDefinitions, func(col ast.ColumnDefinition) bool {
-		return col.ColumnName.Eq(colName.AsExpr())
+		return col.ColumnName.Eq(colName)
 	})
 
 	if indexOfCol == -1 {

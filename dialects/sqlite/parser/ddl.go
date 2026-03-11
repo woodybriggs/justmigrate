@@ -31,13 +31,12 @@ func (p *SqliteParser) CreateStatement() ast.Statement {
 	default:
 		err := report.
 			NewReport("parse error").
-			WithLabels([]report.Label{
-				{
-					Source: p.Current().SourceCode,
-					Range:  p.Current().SourceRange,
-					Note:   "unknown token for create statement",
-				},
-			})
+			WithLabels(report.Label{
+				Source: p.Current().SourceCode,
+				Range:  p.Current().SourceRange,
+				Note:   "unknown token for create statement",
+			},
+			)
 		p.ReportError(err)
 		return nil
 	}

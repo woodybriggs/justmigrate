@@ -2,11 +2,29 @@ package ast
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
+	"strings"
 	"woodybriggs/justmigrate/core/tik"
 )
 
+type ParseError struct {
+	Err            error // this would be of type report.Report
+	ConsumedTokens []tik.Token
+}
+
+func MakeParseError(err error, consumedTokens ...tik.Token) *ParseError {
+	return &ParseError{
+		Err:            err,
+		ConsumedTokens: consumedTokens,
+	}
+}
+
 type Identifier tik.Token
+
+func (node *Identifier) String() string {
+	return fmt.Sprintf("%c%s%c", node.OpenQuote, node.Text, node.CloseQuote)
+}
 
 func MakeIdentifier(token tik.Token) *Identifier {
 	ident := Identifier(token)
@@ -23,25 +41,6 @@ func (t Identifier) ToStringLiteral() LiteralString {
 		Token: tik.Token(t),
 		Value: t.Text,
 	}
-}
-
-func (node *Identifier) Eq(other Expr) bool {
-	if other == nil {
-		return false
-	}
-
-	switch t := other.(type) {
-	case *Identifier:
-		return node.Text == t.Text
-	case Expr:
-		return node.AsExpr().Eq(t)
-	default:
-		return false
-	}
-}
-
-func (node *Identifier) AsExpr() Expr {
-	return Expr(node)
 }
 
 type Keyword tik.Token
@@ -268,6 +267,17 @@ func MakeIfNotExists(
 type CatalogObjectIdentifier struct {
 	SchemaName *Identifier
 	ObjectName Identifier
+}
+
+func (node *CatalogObjectIdentifier) String() string {
+	sb := &strings.Builder{}
+
+	if node.SchemaName != nil {
+		fmt.Fprint(sb, node.SchemaName)
+		fmt.Fprint(sb, ".")
+	}
+	fmt.Fprint(sb, node.ObjectName)
+	return sb.String()
 }
 
 func MakeCatalogObjectIdentifier(
