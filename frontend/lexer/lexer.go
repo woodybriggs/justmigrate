@@ -1,11 +1,11 @@
-package luther
+package lexer
 
 import (
 	"io"
 	"os"
 	"strings"
 	"unicode"
-	"woodybriggs/justmigrate/core/tik"
+	"woodybriggs/justmigrate/frontend/token"
 )
 
 type SourceCode struct {
@@ -308,77 +308,77 @@ func (t *Lexer) octalNumeric() string {
 	return string(t.Raw[start:end])
 }
 
-func (t Lexer) PeekToken() (token tik.Token) {
-	token = t.NextToken()
-	return token
+func (t Lexer) PeekToken() (tok token.Token) {
+	tok = t.NextToken()
+	return tok
 }
 
-func (t *Lexer) NextToken() (token tik.Token) {
-	token.FileLoc.FileName = t.SourceCode.FileName
-	token.SourceCode = t.SourceCode
+func (t *Lexer) NextToken() (tok token.Token) {
+	tok.FileLoc.FileName = t.SourceCode.FileName
+	tok.SourceCode = t.SourceCode
 
-	token.LeadingTrivia = t.consumeLeadingTrivia()
+	tok.LeadingTrivia = t.consumeLeadingTrivia()
 	defer func() {
-		token.SourceRange.End = t.Cur
-		token.FileLoc.Line = t.LexerData.Row
-		token.FileLoc.Col = token.SourceRange.Start - t.LexerData.Bol + 1
-		token.TrailingTrivia = t.consumeTrailingTrivia()
+		tok.SourceRange.End = t.Cur
+		tok.FileLoc.Line = t.LexerData.Row
+		tok.FileLoc.Col = tok.SourceRange.Start - t.LexerData.Bol + 1
+		tok.TrailingTrivia = t.consumeTrailingTrivia()
 	}()
 
 	if t.Eof() {
-		token.Kind = tik.TokenKind_EOF
-		token.FileLoc.Line = t.LexerData.Row
-		token.FileLoc.Col = t.Cur
-		return token
+		tok.Kind = token.TokenKind_EOF
+		tok.FileLoc.Line = t.LexerData.Row
+		tok.FileLoc.Col = t.Cur
+		return tok
 	}
 
-	token.SourceRange.Start = t.Cur
+	tok.SourceRange.Start = t.Cur
 	switch t.currentRune() {
 	case ';', ',', '(', ')', '=', '+', '-', '*', '/':
 		{
 			r := t.currentRune()
 			t.eat()
-			token.Kind = (tik.TokenKind)(r)
-			token.Text = string(r)
-			return token
+			tok.Kind = (token.TokenKind)(r)
+			tok.Text = string(r)
+			return tok
 		}
 	case '!':
 		{
 			t.eat()
 			if t.currentRune() == '=' {
 				t.eat()
-				token.Kind = tik.TokenKind_neq
-				token.Text = "!="
-				return token
+				tok.Kind = token.TokenKind_neq
+				tok.Text = "!="
+				return tok
 			}
-			token.Kind = '!'
-			token.Text = "!"
-			return token
+			tok.Kind = '!'
+			tok.Text = "!"
+			return tok
 		}
 	case '>':
 		{
 			t.eat()
 			if t.currentRune() == '=' {
 				t.eat()
-				token.Kind = tik.TokenKind_gte
-				token.Text = ">="
-				return token
+				tok.Kind = token.TokenKind_gte
+				tok.Text = ">="
+				return tok
 			}
-			token.Kind = tik.TokenKind_gt
-			token.Text = ">"
-			return token
+			tok.Kind = token.TokenKind_gt
+			tok.Text = ">"
+			return tok
 		}
 	case '<':
 		{
 			t.eat()
 			if t.currentRune() == '=' {
 				t.eat()
-				token.Kind = tik.TokenKind_lte
-				token.Text = "<="
+				tok.Kind = token.TokenKind_lte
+				tok.Text = "<="
 			}
-			token.Kind = tik.TokenKind_lt
-			token.Text = "<"
-			return token
+			tok.Kind = token.TokenKind_lt
+			tok.Text = "<"
+			return tok
 		}
 	case '"':
 		{
@@ -395,11 +395,11 @@ func (t *Lexer) NextToken() (token tik.Token) {
 			end := t.Cur
 			// eat the last "
 			t.eat()
-			token.Kind = tik.TokenKind_Identifier
-			token.Text = string(t.Raw[start:end])
-			token.OpenQuote = '"'
-			token.CloseQuote = '"'
-			return token
+			tok.Kind = token.TokenKind_Identifier
+			tok.Text = string(t.Raw[start:end])
+			tok.OpenQuote = '"'
+			tok.CloseQuote = '"'
+			return tok
 		}
 	case '[':
 		{
@@ -415,11 +415,11 @@ func (t *Lexer) NextToken() (token tik.Token) {
 			end := t.Cur
 			// eat the last ]
 			t.eat()
-			token.Kind = tik.TokenKind_Identifier
-			token.Text = string(t.Raw[start:end])
-			token.OpenQuote = '['
-			token.CloseQuote = ']'
-			return token
+			tok.Kind = token.TokenKind_Identifier
+			tok.Text = string(t.Raw[start:end])
+			tok.OpenQuote = '['
+			tok.CloseQuote = ']'
+			return tok
 		}
 	case '`':
 		{
@@ -436,17 +436,17 @@ func (t *Lexer) NextToken() (token tik.Token) {
 			end := t.Cur
 			// eat the last `
 			t.eat()
-			token.Kind = tik.TokenKind_Identifier
-			token.Text = string(t.Raw[start:end])
-			token.OpenQuote = '`'
-			token.CloseQuote = '`'
-			return token
+			tok.Kind = token.TokenKind_Identifier
+			tok.Text = string(t.Raw[start:end])
+			tok.OpenQuote = '`'
+			tok.CloseQuote = '`'
+			return tok
 		}
 	case '\'':
 		{
 			// eat the first '
 			t.eat()
-			token.Kind = tik.TokenKind_StringLiteral
+			tok.Kind = token.TokenKind_StringLiteral
 			start := t.Cur
 			prev := rune(0)
 			for !t.Eof() {
@@ -458,48 +458,48 @@ func (t *Lexer) NextToken() (token tik.Token) {
 			// eat the last '
 			t.eat()
 			end := t.Cur
-			token.Text = string(t.Raw[start:end])
-			token.OpenQuote = '\''
-			token.CloseQuote = '\''
-			return token
+			tok.Text = string(t.Raw[start:end])
+			tok.OpenQuote = '\''
+			tok.CloseQuote = '\''
+			return tok
 		}
 	case '.':
 		{
 			if p, err := t.peekRune(); err != io.EOF && unicode.IsDigit(p) {
 				text, isFloat := t.decimalNumeric()
 				if isFloat {
-					token.Kind = tik.TokenKind_FloatNumericLiteral
+					tok.Kind = token.TokenKind_FloatNumericLiteral
 				} else {
-					token.Kind = tik.TokenKind_IntegerNumericLiteral
+					tok.Kind = token.TokenKind_IntegerNumericLiteral
 				}
-				token.Text = text
-				return token
+				tok.Text = text
+				return tok
 			}
 			t.eat()
-			token.Kind = tik.TokenKind_Period
-			token.Text = "."
-			return token
+			tok.Kind = token.TokenKind_Period
+			tok.Text = "."
+			return tok
 		}
 	case '0':
 		{
 			switch p, err := t.peekRune(); err != io.EOF {
 			case unicode.ToLower(p) == 'x':
 				{
-					token.Kind = tik.TokenKind_HexNumericLiteral
-					token.Text = t.hexNumeric()
-					return token
+					tok.Kind = token.TokenKind_HexNumericLiteral
+					tok.Text = t.hexNumeric()
+					return tok
 				}
 			case unicode.ToLower(p) == 'b':
 				{
-					token.Kind = tik.TokenKind_BinaryNumericLiteral
-					token.Text = t.binaryNumeric()
-					return token
+					tok.Kind = token.TokenKind_BinaryNumericLiteral
+					tok.Text = t.binaryNumeric()
+					return tok
 				}
 			case p == '0':
 				{
-					token.Kind = tik.TokenKind_OctalNumericLiteral
-					token.Text = t.octalNumeric()
-					return token
+					tok.Kind = token.TokenKind_OctalNumericLiteral
+					tok.Text = t.octalNumeric()
+					return tok
 				}
 			}
 		}
@@ -507,24 +507,24 @@ func (t *Lexer) NextToken() (token tik.Token) {
 	case '1', '2', '3', '4', '5', '6', '7', '8', '9':
 		{
 			text, isFloat := t.decimalNumeric()
-			token.Text = text
+			tok.Text = text
 			if isFloat {
-				token.Kind = tik.TokenKind_FloatNumericLiteral
+				tok.Kind = token.TokenKind_FloatNumericLiteral
 			} else {
-				token.Kind = tik.TokenKind_IntegerNumericLiteral
+				tok.Kind = token.TokenKind_IntegerNumericLiteral
 			}
-			return token
+			return tok
 		}
 	}
 
 	if isIdentifierStart(t.currentRune()) {
-		token.Kind = tik.TokenKind_Identifier
-		token.Text = t.identifier()
-		if kind, ok := tik.KeywordIndex.GetValue(strings.ToLower(token.Text)); ok {
-			token.Kind = kind
+		tok.Kind = token.TokenKind_Identifier
+		tok.Text = t.identifier()
+		if kind, ok := token.KeywordIndex.GetValue(strings.ToLower(tok.Text)); ok {
+			tok.Kind = kind
 		}
-		return token
+		return tok
 	}
 
-	return token
+	return tok
 }

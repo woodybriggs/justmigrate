@@ -1,14 +1,14 @@
-package sqlite
+package parser
 
 import (
 	"fmt"
 	"runtime"
 	"strings"
 	"testing"
-	"woodybriggs/justmigrate/core/ast"
-	"woodybriggs/justmigrate/core/formatter"
-	"woodybriggs/justmigrate/core/luther"
-	"woodybriggs/justmigrate/core/tik"
+	"woodybriggs/justmigrate/backend/formatter"
+	"woodybriggs/justmigrate/frontend/ast"
+	"woodybriggs/justmigrate/frontend/lexer"
+	"woodybriggs/justmigrate/frontend/token"
 )
 
 func makeParser(input string) *SqliteParser {
@@ -20,7 +20,7 @@ func makeParser(input string) *SqliteParser {
 	funcInfo := runtime.FuncForPC(pc)
 	file, _ := funcInfo.FileLine(pc)
 
-	lex := luther.NewLexer(luther.SourceCode{
+	lex := lexer.NewLexer(lexer.SourceCode{
 		FileName: fmt.Sprintf("%s/%s", file, funcInfo.Name()),
 		Raw:      []rune(input),
 	})
@@ -53,7 +53,7 @@ func TestCreateTable(t *testing.T) {
 					},
 					ColumnConstraints: []ast.ColumnConstraint{
 						&ast.ColumnConstraint_PrimaryKey{
-							AutoIncrement: &ast.Keyword{Kind: tik.TokenKind_Keyword_AUTOINCREMENT},
+							AutoIncrement: &ast.Keyword{Kind: token.TokenKind_Keyword_AUTOINCREMENT},
 						},
 					},
 				},

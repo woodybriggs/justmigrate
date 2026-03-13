@@ -1,4 +1,4 @@
-package tik
+package token
 
 import (
 	"fmt"

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 	"slices"
-	"woodybriggs/justmigrate/core/ast"
-	"woodybriggs/justmigrate/core/diff"
-	"woodybriggs/justmigrate/core/formatter"
+	"woodybriggs/justmigrate/backend/diff"
+	"woodybriggs/justmigrate/backend/formatter"
+	"woodybriggs/justmigrate/frontend/ast"
 )
 
 // Plan takes a first pass of "dumb" operations (create table, drop table, etc.)

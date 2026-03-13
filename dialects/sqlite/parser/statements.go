@@ -1,12 +1,12 @@
-package sqlite
+package parser
 
 import (
 	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
-	"woodybriggs/justmigrate/core/ast"
-	"woodybriggs/justmigrate/core/tik"
+	"woodybriggs/justmigrate/frontend/ast"
+	"woodybriggs/justmigrate/frontend/token"
 )
 
 func (p *SqliteParser) Statements() []ast.Statement {
@@ -20,7 +20,7 @@ func (p *SqliteParser) Statements() []ast.Statement {
 						debug.PrintStack()
 						os.Exit(2)
 					}
-					p.Synchronize([]tik.TokenKind{';'})
+					p.Synchronize([]token.TokenKind{';'})
 				}
 			}()
 
@@ -40,7 +40,7 @@ func (p *SqliteParser) Statement() ast.Statement {
 	defer p.PopParseContext()
 
 	switch p.Current().Kind {
-	case tik.TokenKind_Keyword_CREATE:
+	case token.TokenKind_Keyword_CREATE:
 		return p.CreateStatement()
 	default:
 		fmt.Fprintf(os.Stderr, "unhandled statement")

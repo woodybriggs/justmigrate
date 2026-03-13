@@ -4,9 +4,19 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"woodybriggs/justmigrate/core/luther"
-	"woodybriggs/justmigrate/core/tik"
+	"woodybriggs/justmigrate/frontend/lexer"
+	"woodybriggs/justmigrate/frontend/token"
 )
+
+type Source struct {
+	FileName string
+	Raw      []rune
+}
+
+type Range struct {
+	Start int
+	End   int
+}
 
 type LineInfo struct {
 	Line    int
@@ -34,7 +44,7 @@ func (r *Renderer) Render(report Report) string {
 	// labels can be from different sources, so we group
 	// labels by source and then find the source range.
 	type SourceCodeFileName string
-	sources := map[SourceCodeFileName]*luther.SourceCode{}
+	sources := map[SourceCodeFileName]*lexer.SourceCode{}
 	orderSource := []SourceCodeFileName{}
 	sourceLabels := map[SourceCodeFileName][]*Label{}
 	sourceLines := map[SourceCodeFileName][]LineInfo{}
@@ -59,7 +69,7 @@ func (r *Renderer) Render(report Report) string {
 			end = max(end, label.Range.End)
 		}
 
-		sourceLines[sourceFileName] = r.getLinesInRange(*sources[sourceFileName], tik.TextRange{
+		sourceLines[sourceFileName] = r.getLinesInRange(*sources[sourceFileName], Range{
 			Start: start,
 			End:   end,
 		})
@@ -142,15 +152,13 @@ func (r *Renderer) inGutter(s string) string {
 }
 
 // getLinesInRange converts the flat Raw rune slice into a slice of LineInfo
-func (r *Renderer) getLinesInRange(src luther.SourceCode, tr tik.TextRange) []LineInfo {
+func (r *Renderer) getLinesInRange(src lexer.SourceCode, tr Range) []LineInfo {
 	var result []LineInfo
 
 	currentLine := 1
 	lineStartOffset := 0
 
-	lines := strings.Split(string(src.Raw), "\n")
-
-	for _, content := range lines {
+	for content := range strings.SplitSeq(string(src.Raw), "\n") {
 		lineEndOffset := lineStartOffset + len([]rune(content))
 
 		if lineEndOffset >= tr.Start && lineStartOffset <= tr.End {
@@ -176,7 +184,7 @@ func (r *Renderer) getLinesInRange(src luther.SourceCode, tr tik.TextRange) []Li
 	return result
 }
 
-func rangeToLineInfo(src luther.SourceCode, tr tik.TextRange) LineInfo {
+func rangeToLineInfo(src lexer.SourceCode, tr token.TextRange) LineInfo {
 	currentLine := 1
 	lineStartOffset := 0
 

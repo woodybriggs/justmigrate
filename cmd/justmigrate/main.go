@@ -8,13 +8,13 @@ import (
 	"log"
 	"os"
 
-	"woodybriggs/justmigrate/core/ast"
-	"woodybriggs/justmigrate/core/diff"
-	"woodybriggs/justmigrate/core/luther"
-	"woodybriggs/justmigrate/core/report"
-	"woodybriggs/justmigrate/database"
-	sqlitegen "woodybriggs/justmigrate/dialects/sqlite/generator"
-	sqliteparser "woodybriggs/justmigrate/dialects/sqlite/parser"
+	"woodybriggs/justmigrate/backend/diff"
+	"woodybriggs/justmigrate/dialects/sqlite"
+	"woodybriggs/justmigrate/dialects/sqlite/generator"
+	"woodybriggs/justmigrate/dialects/sqlite/parser"
+	"woodybriggs/justmigrate/frontend/ast"
+	"woodybriggs/justmigrate/frontend/lexer"
+	"woodybriggs/justmigrate/frontend/report"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -60,20 +60,18 @@ func ShowWarnings(warnings []report.Report, w io.Writer) {
 	}
 }
 
-func AstFromDatabase(database Database) (luther.SourceCode, []ast.Statement, error) {
+func AstFromDatabase(database Database) (lexer.SourceCode, []ast.Statement, error) {
 	source, err := database.ExportDataDefinitions()
 	if err != nil {
-		return luther.SourceCode{}, nil, err
+		return lexer.SourceCode{}, nil, err
 	}
 
-	lexer := luther.NewLexer(
-		luther.SourceCode{
+	parser := parser.NewSqliteParser(lexer.NewLexer(
+		lexer.SourceCode{
 			FileName: database.Url(),
 			Raw:      []rune(source),
 		},
-	)
-
-	parser := sqliteparser.NewSqliteParser(lexer)
+	))
 
 	nodes := parser.Statements()
 	errors := parser.ErrorsAsErrorSlice()
@@ -91,13 +89,13 @@ func AstFromDatabase(database Database) (luther.SourceCode, []ast.Statement, err
 	return parser.Parser.Current().SourceCode, nodes, nil
 }
 
-func AstFromFile(file *os.File) (luther.SourceCode, []ast.Statement, error) {
-	lexer, err := luther.NewLexerFromFile(file)
+func AstFromFile(file *os.File) (lexer.SourceCode, []ast.Statement, error) {
+	lexer, err := lexer.NewLexerFromFile(file)
 	if err != nil {
 		return lexer.SourceCode, nil, err
 	}
 
-	parser := sqliteparser.NewSqliteParser(lexer)
+	parser := parser.NewSqliteParser(lexer)
 
 	nodes := parser.Statements()
 	errors := parser.ErrorsAsErrorSlice()
@@ -126,7 +124,7 @@ func main() {
 		log.Panicln(err)
 	}
 
-	db := &database.Sqlite{DB: conn, FileName: databaseURL}
+	db := &sqlite.Sqlite{DB: conn, FileName: databaseURL}
 
 	fileName := "resources/schema.sql"
 	file, err := os.Open(fileName)
@@ -155,7 +153,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	gen := sqlitegen.SqliteFormatter{}
+	gen := generator.SqliteFormatter{}
 
 	ops, err = gen.Plan(srcAst, tgtAst, ops)
 

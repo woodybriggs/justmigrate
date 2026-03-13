@@ -1,10 +1,10 @@
-package sqlite
+package parser
 
 import (
 	"fmt"
-	"woodybriggs/justmigrate/core/ast"
-	"woodybriggs/justmigrate/core/report"
-	"woodybriggs/justmigrate/core/tik"
+	"woodybriggs/justmigrate/frontend/ast"
+	"woodybriggs/justmigrate/frontend/report"
+	"woodybriggs/justmigrate/frontend/token"
 )
 
 func (p *SqliteParser) CreateStatement() ast.Statement {
@@ -12,21 +12,21 @@ func (p *SqliteParser) CreateStatement() ast.Statement {
 	defer p.PopParseContext()
 
 	switch p.Peeked().Kind {
-	case tik.TokenKind_Keyword_TABLE:
+	case token.TokenKind_Keyword_TABLE:
 		return p.CreateTableStatement(false)
-	case tik.TokenKind_Keyword_VIEW:
+	case token.TokenKind_Keyword_VIEW:
 		return p.CreateViewStatement(false)
-	case tik.TokenKind_Keyword_TRIGGER:
+	case token.TokenKind_Keyword_TRIGGER:
 		return p.CreateTriggerStatement(false)
-	case tik.TokenKind_Keyword_INDEX:
+	case token.TokenKind_Keyword_INDEX:
 		isUnique := false
 		return p.CreateIndexStatement(isUnique)
-	case tik.TokenKind_Keyword_UNIQUE:
+	case token.TokenKind_Keyword_UNIQUE:
 		isUnique := true
 		return p.CreateIndexStatement(isUnique)
-	case tik.TokenKind_Keyword_VIRTUAL:
+	case token.TokenKind_Keyword_VIRTUAL:
 		return p.CreateVirtualTableStatement()
-	case tik.TokenKind_Keyword_TEMPORARY:
+	case token.TokenKind_Keyword_TEMPORARY:
 		return p.CreateTemporaryStatement()
 	default:
 		err := report.
@@ -48,13 +48,13 @@ func (p *SqliteParser) CreateTableStatement(isTemporary bool) *ast.CreateTable {
 
 	var temporaryKeyword *ast.Keyword = nil
 
-	createKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_CREATE))
+	createKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_CREATE))
 
 	if isTemporary {
-		temporaryKeyword = ast.MakeKeyword(p.Expect(tik.TokenKind_Keyword_TEMPORARY))
+		temporaryKeyword = ast.MakeKeyword(p.Expect(token.TokenKind_Keyword_TEMPORARY))
 	}
 
-	tableKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_TABLE))
+	tableKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_TABLE))
 
 	ifnotexists := p.MaybeIfNotExists()
 
@@ -84,21 +84,21 @@ func (p *SqliteParser) CreateTriggerStatement(false bool) ast.Statement {
 }
 
 func (p *SqliteParser) CreateIndexStatement(isUnique bool) ast.Statement {
-	createKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_CREATE))
+	createKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_CREATE))
 
 	var uniqueKeyword *ast.Keyword = nil
-	if p.Current().Kind == tik.TokenKind_Keyword_UNIQUE {
+	if p.Current().Kind == token.TokenKind_Keyword_UNIQUE {
 		uniqueKeyword = ast.MakeKeyword(p.Current())
 		p.Advance()
 	}
 
-	indexKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_INDEX))
+	indexKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_INDEX))
 
 	ifNotExists := p.MaybeIfNotExists()
 
 	indexIdentifier := p.CatalogObjectIdentifier()
 
-	onKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_ON))
+	onKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_ON))
 
 	tableName := p.Identifier()
 
@@ -121,7 +121,7 @@ func (p *SqliteParser) CreateIndexStatement(isUnique bool) ast.Statement {
 
 	var whereKeyword *ast.Keyword = nil
 	var whereExpr ast.Expr = nil
-	if p.Current().Kind == tik.TokenKind_Keyword_WHERE {
+	if p.Current().Kind == token.TokenKind_Keyword_WHERE {
 		whereKeyword = ast.MakeKeyword(p.Current())
 		p.Advance()
 		whereExpr = p.Expr(0)
@@ -152,12 +152,12 @@ func (p *SqliteParser) CreateTemporaryStatement() ast.Statement {
 }
 
 func (p *SqliteParser) MaybeIfNotExists() *ast.IfNotExists {
-	if p.Current().Kind != tik.TokenKind_Keyword_IF {
+	if p.Current().Kind != token.TokenKind_Keyword_IF {
 		return nil
 	}
-	ifKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_IF))
-	notKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_NOT))
-	existsKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_EXISTS))
+	ifKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_IF))
+	notKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_NOT))
+	existsKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_EXISTS))
 
 	return ast.MakeIfNotExists(ifKeyword, notKeyword, existsKeyword)
 }
@@ -168,10 +168,10 @@ func (p *SqliteParser) MaybeTableOptions() *ast.TableOptions {
 	var strict *ast.Keyword = nil
 
 	for !p.EndOfFile() {
-		if p.Current().Kind == tik.TokenKind_Keyword_STRICT {
+		if p.Current().Kind == token.TokenKind_Keyword_STRICT {
 			strict = ast.MakeKeyword(p.Current())
 			p.Advance()
-		} else if p.Current().Kind == tik.TokenKind_Keyword_WITHOUT {
+		} else if p.Current().Kind == token.TokenKind_Keyword_WITHOUT {
 			withoutRowId = p.WithoutRowId()
 		}
 
@@ -190,8 +190,8 @@ func (p *SqliteParser) MaybeTableOptions() *ast.TableOptions {
 }
 
 func (p *SqliteParser) WithoutRowId() *ast.WithoutRowId {
-	withoutKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_WITHOUT))
-	rowidKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_ROWID))
+	withoutKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_WITHOUT))
+	rowidKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_ROWID))
 	return ast.MakeWithoutRowId(
 		withoutKeyword,
 		rowidKeyword,

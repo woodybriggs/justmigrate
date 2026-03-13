@@ -5,28 +5,28 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"woodybriggs/justmigrate/core/tik"
+	"woodybriggs/justmigrate/frontend/token"
 )
 
 type ParseError struct {
 	Err            error // this would be of type report.Report
-	ConsumedTokens []tik.Token
+	ConsumedTokens []token.Token
 }
 
-func MakeParseError(err error, consumedTokens ...tik.Token) *ParseError {
+func MakeParseError(err error, consumedTokens ...token.Token) *ParseError {
 	return &ParseError{
 		Err:            err,
 		ConsumedTokens: consumedTokens,
 	}
 }
 
-type Identifier tik.Token
+type Identifier token.Token
 
 func (node *Identifier) String() string {
 	return fmt.Sprintf("%c%s%c", node.OpenQuote, node.Text, node.CloseQuote)
 }
 
-func MakeIdentifier(token tik.Token) *Identifier {
+func MakeIdentifier(token token.Token) *Identifier {
 	ident := Identifier(token)
 	return &ident
 }
@@ -38,14 +38,14 @@ func (t *Identifier) nodePragmaValue() {}
 
 func (t Identifier) ToStringLiteral() LiteralString {
 	return LiteralString{
-		Token: tik.Token(t),
+		Token: token.Token(t),
 		Value: t.Text,
 	}
 }
 
-type Keyword tik.Token
+type Keyword token.Token
 
-func MakeKeyword(token tik.Token) *Keyword {
+func MakeKeyword(token token.Token) *Keyword {
 	result := Keyword(token)
 	return &result
 }
@@ -148,9 +148,9 @@ func MakeCreateIndex(
 	indexIdentifier *CatalogObjectIdentifier,
 	onKeyword Keyword,
 	tableName Identifier,
-	lParen tik.Token,
+	lParen token.Token,
 	indexedCols []IndexedColumn,
-	rParen tik.Token,
+	rParen token.Token,
 	whereKeyword *Keyword,
 	whereExpr Expr,
 ) *CreateIndex {
@@ -294,20 +294,20 @@ func MakeCatalogObjectIdentifier(
 // TableDefinitionAsSelect
 // TableDefinitionColumnsConstraints
 type TableDefinition struct {
-	LParen tik.Token
+	LParen token.Token
 
 	// AsSelect *SelectStatement
 	ColumnDefinitions []ColumnDefinition
 	TableConstraints  []TableConstraint
 
-	RParent tik.Token
+	RParent token.Token
 }
 
 func MakeTableDefinition(
-	lParen tik.Token,
+	lParen token.Token,
 	columnDefs []ColumnDefinition,
 	constraints []TableConstraint,
-	rParen tik.Token,
+	rParen token.Token,
 ) *TableDefinition {
 	return &TableDefinition{
 		LParen:            lParen,
@@ -398,17 +398,17 @@ func MakeConflictClause(
 type TableConstraint_Check struct {
 	Name         *ConstraintName
 	CheckKeyword Keyword
-	LParen       tik.Token
+	LParen       token.Token
 	Expr         Expr
-	RParen       tik.Token
+	RParen       token.Token
 }
 
 func MakeTableConstraintCheck(
 	constraintName *ConstraintName,
 	checkKeyword Keyword,
-	lParen tik.Token,
+	lParen token.Token,
 	expr Expr,
-	rParen tik.Token,
+	rParen token.Token,
 ) *TableConstraint_Check {
 	return &TableConstraint_Check{
 		Name:         constraintName,
@@ -423,10 +423,10 @@ type TableConstraint_PrimaryKey struct {
 	Name           *ConstraintName
 	PrimaryKeyword Keyword
 	KeyKeyword     Keyword
-	LParen         tik.Token
+	LParen         token.Token
 	IndexedColumns []IndexedColumn
 	AutoIncrement  *Keyword
-	RParen         tik.Token
+	RParen         token.Token
 	ConflictClause *ConflictClause
 }
 
@@ -434,9 +434,9 @@ func MakeTableConstraintPrimaryKey(
 	constraintName *ConstraintName,
 	primaryKeyword Keyword,
 	keyKeyword Keyword,
-	lParen tik.Token,
+	lParen token.Token,
 	indexedColumns []IndexedColumn,
-	rParen tik.Token,
+	rParen token.Token,
 	conflictClause *ConflictClause,
 	// sqlite
 	autoincrement *Keyword,
@@ -458,9 +458,9 @@ type TableConstraint_ForeignKey struct {
 	Name           *ConstraintName
 	ForeignKeyword Keyword
 	KeyKeyword     Keyword
-	LParen         tik.Token
+	LParen         token.Token
 	Columns        []Identifier
-	RParen         tik.Token
+	RParen         token.Token
 	FkClause       ForeignKeyClause
 }
 
@@ -468,9 +468,9 @@ func MakeTableConstraintForeignKey(
 	constraintName *ConstraintName,
 	foreignKeyword Keyword,
 	keyKeyword Keyword,
-	lParen tik.Token,
+	lParen token.Token,
 	columns []Identifier,
-	rParen tik.Token,
+	rParen token.Token,
 	fkClause *ForeignKeyClause,
 ) *TableConstraint_ForeignKey {
 	return &TableConstraint_ForeignKey{
@@ -506,9 +506,9 @@ func (node *TableConstraint_ForeignKey) pairColumns() []IdentifierPair {
 type ForeignKeyClause struct {
 	ReferencesKeyword Keyword
 	ForeignTable      CatalogObjectIdentifier
-	LParen            tik.Token
+	LParen            token.Token
 	ForeignColumns    []Identifier
-	RParen            tik.Token
+	RParen            token.Token
 	Actions           []ForeignKeyAction
 	MatchName         *Identifier
 	Deferrable        *ForeignKeyDeferrable
@@ -517,9 +517,9 @@ type ForeignKeyClause struct {
 func MakeForeignKeyClause(
 	referencesKeyword Keyword,
 	foreignTable CatalogObjectIdentifier,
-	lParen tik.Token,
+	lParen token.Token,
 	foreignColumns []Identifier,
-	rParen tik.Token,
+	rParen token.Token,
 	actions []ForeignKeyAction,
 	matchName *Identifier,
 	deferrable *ForeignKeyDeferrable,
@@ -806,75 +806,75 @@ func MakeColumnConstraintCheck(
 
 type ExprList []Expr
 
-func TokenToLiteral(token tik.Token) (Expr, error) {
-	switch token.Kind {
-	case tik.TokenKind_Keyword_NULL:
+func TokenToLiteral(tok token.Token) (Expr, error) {
+	switch tok.Kind {
+	case token.TokenKind_Keyword_NULL:
 		{
-			return MakeLiteralNull(token), nil
+			return MakeLiteralNull(tok), nil
 		}
-	case tik.TokenKind_StringLiteral:
+	case token.TokenKind_StringLiteral:
 		{
-			return MakeLiteralString(token, token.Text), nil
+			return MakeLiteralString(tok, tok.Text), nil
 		}
 	// allow literals to become string literals where a literal is needed
-	case tik.TokenKind_Identifier:
+	case token.TokenKind_Identifier:
 		{
-			return MakeLiteralString(token, token.Text), nil
+			return MakeLiteralString(tok, tok.Text), nil
 		}
-	case tik.TokenKind_Keyword_TRUE:
+	case token.TokenKind_Keyword_TRUE:
 		{
-			return MakeLiteralBoolean(token, true), nil
+			return MakeLiteralBoolean(tok, true), nil
 		}
-	case tik.TokenKind_Keyword_FALSE:
+	case token.TokenKind_Keyword_FALSE:
 		{
-			return MakeLiteralBoolean(token, false), nil
+			return MakeLiteralBoolean(tok, false), nil
 		}
-	case tik.TokenKind_FloatNumericLiteral:
+	case token.TokenKind_FloatNumericLiteral:
 		{
-			val, err := strconv.ParseFloat(token.Text, 64)
+			val, err := strconv.ParseFloat(tok.Text, 64)
 			if err != nil {
 				return nil, err
 			}
-			return MakeLiteralFloat(token, val), nil
+			return MakeLiteralFloat(tok, val), nil
 		}
-	case tik.TokenKind_IntegerNumericLiteral:
+	case token.TokenKind_IntegerNumericLiteral:
 		{
-			ival, err := strconv.ParseInt(token.Text, 10, 64)
+			ival, err := strconv.ParseInt(tok.Text, 10, 64)
 			if err != nil {
 				if errors.Is(err, strconv.ErrRange) {
-					uval, err := strconv.ParseUint(token.Text, 10, 64)
+					uval, err := strconv.ParseUint(tok.Text, 10, 64)
 					if err != nil {
 						return nil, err
 					}
-					return MakeLiteralUnsignedInteger(token, uval), nil
+					return MakeLiteralUnsignedInteger(tok, uval), nil
 				}
 				return nil, err
 			}
-			return MakeLiteralSignedInteger(token, ival), nil
+			return MakeLiteralSignedInteger(tok, ival), nil
 		}
-	case tik.TokenKind_BinaryNumericLiteral:
+	case token.TokenKind_BinaryNumericLiteral:
 		{
-			uval, err := strconv.ParseUint(token.Text, 2, 64)
+			uval, err := strconv.ParseUint(tok.Text, 2, 64)
 			if err != nil {
 				return nil, err
 			}
-			return MakeLiteralUnsignedInteger(token, uval), nil
+			return MakeLiteralUnsignedInteger(tok, uval), nil
 		}
-	case tik.TokenKind_OctalNumericLiteral:
+	case token.TokenKind_OctalNumericLiteral:
 		{
-			uval, err := strconv.ParseUint(token.Text, 8, 64)
+			uval, err := strconv.ParseUint(tok.Text, 8, 64)
 			if err != nil {
 				return nil, err
 			}
-			return MakeLiteralUnsignedInteger(token, uval), nil
+			return MakeLiteralUnsignedInteger(tok, uval), nil
 		}
-	case tik.TokenKind_HexNumericLiteral:
+	case token.TokenKind_HexNumericLiteral:
 		{
-			uval, err := strconv.ParseUint(token.Text, 16, 64)
+			uval, err := strconv.ParseUint(tok.Text, 16, 64)
 			if err != nil {
 				return nil, err
 			}
-			return MakeLiteralUnsignedInteger(token, uval), nil
+			return MakeLiteralUnsignedInteger(tok, uval), nil
 		}
 	default:
 		return nil, errors.New("token can not be converted to literal")
@@ -882,21 +882,21 @@ func TokenToLiteral(token tik.Token) (Expr, error) {
 }
 
 type LiteralNull struct {
-	Token tik.Token
+	Token token.Token
 }
 
-func MakeLiteralNull(token tik.Token) *LiteralNull {
+func MakeLiteralNull(token token.Token) *LiteralNull {
 	return &LiteralNull{
 		Token: token,
 	}
 }
 
 type LiteralBoolean struct {
-	Token tik.Token
+	Token token.Token
 	Value bool
 }
 
-func MakeLiteralBoolean(token tik.Token, value bool) *LiteralBoolean {
+func MakeLiteralBoolean(token token.Token, value bool) *LiteralBoolean {
 	return &LiteralBoolean{
 		Token: token,
 		Value: value,
@@ -904,11 +904,11 @@ func MakeLiteralBoolean(token tik.Token, value bool) *LiteralBoolean {
 }
 
 type LiteralUnsignedInteger struct {
-	Token tik.Token
+	Token token.Token
 	Value uint64
 }
 
-func MakeLiteralUnsignedInteger(token tik.Token, value uint64) *LiteralUnsignedInteger {
+func MakeLiteralUnsignedInteger(token token.Token, value uint64) *LiteralUnsignedInteger {
 	return &LiteralUnsignedInteger{
 		Token: token,
 		Value: value,
@@ -916,11 +916,11 @@ func MakeLiteralUnsignedInteger(token tik.Token, value uint64) *LiteralUnsignedI
 }
 
 type LiteralSignedInteger struct {
-	Token tik.Token
+	Token token.Token
 	Value int64
 }
 
-func MakeLiteralSignedInteger(token tik.Token, value int64) *LiteralSignedInteger {
+func MakeLiteralSignedInteger(token token.Token, value int64) *LiteralSignedInteger {
 	return &LiteralSignedInteger{
 		Token: token,
 		Value: value,
@@ -928,11 +928,11 @@ func MakeLiteralSignedInteger(token tik.Token, value int64) *LiteralSignedIntege
 }
 
 type LiteralFloat struct {
-	Token tik.Token
+	Token token.Token
 	Value float64
 }
 
-func MakeLiteralFloat(token tik.Token, value float64) *LiteralFloat {
+func MakeLiteralFloat(token token.Token, value float64) *LiteralFloat {
 	return &LiteralFloat{
 		Token: token,
 		Value: value,
@@ -940,11 +940,11 @@ func MakeLiteralFloat(token tik.Token, value float64) *LiteralFloat {
 }
 
 type LiteralString struct {
-	Token tik.Token
+	Token token.Token
 	Value string
 }
 
-func MakeLiteralString(token tik.Token, value string) *LiteralString {
+func MakeLiteralString(token token.Token, value string) *LiteralString {
 	return &LiteralString{
 		Token: token,
 		Value: value,
@@ -952,7 +952,7 @@ func MakeLiteralString(token tik.Token, value string) *LiteralString {
 }
 
 type UnaryOp struct {
-	Operator tik.Token
+	Operator token.Token
 	Rhs      Expr
 }
 
@@ -973,14 +973,14 @@ type BindingPower struct {
 }
 
 type BinaryOp struct {
-	Operator tik.Token
+	Operator token.Token
 	Lhs      Expr
 	Rhs      Expr
 }
 
 func MakeBinaryOpExpr(
 	lhs Expr,
-	op tik.Token,
+	op token.Token,
 	rhs Expr,
 ) *BinaryOp {
 	return &BinaryOp{

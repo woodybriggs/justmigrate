@@ -2,18 +2,18 @@ package report
 
 import (
 	"fmt"
-	"woodybriggs/justmigrate/core/ast"
-	"woodybriggs/justmigrate/core/luther"
-	"woodybriggs/justmigrate/core/tik"
+	"woodybriggs/justmigrate/frontend/ast"
+	"woodybriggs/justmigrate/frontend/lexer"
+	"woodybriggs/justmigrate/frontend/token"
 )
 
 type Label struct {
-	Source luther.SourceCode
-	Range  tik.TextRange
+	Source lexer.SourceCode
+	Range  token.TextRange
 	Note   string
 }
 
-func LabelFromToken(token tik.Token, note string) Label {
+func LabelFromToken(token token.Token, note string) Label {
 	return Label{
 		Source: token.SourceCode,
 		Range:  token.SourceRange,
@@ -22,11 +22,11 @@ func LabelFromToken(token tik.Token, note string) Label {
 }
 
 func LabelFromIdentifier(ident ast.Identifier, note string) Label {
-	return LabelFromToken(tik.Token(ident), note)
+	return LabelFromToken(token.Token(ident), note)
 }
 
 func LabelFromKeyword(keyword ast.Keyword, note string) Label {
-	return LabelFromToken(tik.Token(keyword), note)
+	return LabelFromToken(token.Token(keyword), note)
 }
 
 func (label Label) String() string {
@@ -35,7 +35,7 @@ func (label Label) String() string {
 
 type Report struct {
 	Kind     string
-	Location tik.Location
+	Location token.Location
 	Message  string
 	Labels   []Label
 	Notes    []string
@@ -52,7 +52,7 @@ func NewReport(kind string) *Report {
 	}
 }
 
-func (report *Report) WithLocation(location tik.Location) *Report {
+func (report *Report) WithLocation(location token.Location) *Report {
 	report.Location = location
 	return report
 }

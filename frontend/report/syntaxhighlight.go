@@ -3,8 +3,8 @@ package report
 import (
 	"fmt"
 	"io"
-	"woodybriggs/justmigrate/core/luther"
-	"woodybriggs/justmigrate/core/tik"
+	"woodybriggs/justmigrate/frontend/lexer"
+	"woodybriggs/justmigrate/frontend/token"
 )
 
 type Theme struct {
@@ -36,20 +36,20 @@ func syntaxHighlight(w io.Writer, line renderLine, theme *Theme) {
 		return
 	}
 
-	source := luther.SourceCode{
+	source := lexer.SourceCode{
 		FileName: "n/a",
 		Raw:      []rune(line.Content),
 	}
 
-	miniLex := luther.Lexer{
+	miniLex := lexer.Lexer{
 		SourceCode: source,
-		LexerData: luther.LexerData{
+		LexerData: lexer.LexerData{
 			Row: 1,
 		},
 	}
 
 	tok := miniLex.NextToken()
-	if tok.Kind == tik.TokenKind_EOF && len(line.Content) != 0 {
+	if tok.Kind == token.TokenKind_EOF && len(line.Content) != 0 {
 		// this must be a line comment
 		setForegroundColor(w, theme.CommentColor)
 		fmt.Fprint(w, line.Content)
@@ -57,17 +57,17 @@ func syntaxHighlight(w io.Writer, line renderLine, theme *Theme) {
 		return
 	}
 
-	for tok.Kind != tik.TokenKind_EOF {
+	for tok.Kind != token.TokenKind_EOF {
 		fmt.Fprint(w, tok.LeadingTrivia)
-		if tok.Kind > tik.TokenKindOffset_Keywords {
+		if tok.Kind > token.TokenKindOffset_Keywords {
 			setForegroundColor(w, theme.KeywordColor)
 			fmt.Fprint(w, tok.Text)
 			resetColor(w)
-		} else if tok.Kind == tik.TokenKind_Identifier {
+		} else if tok.Kind == token.TokenKind_Identifier {
 			setForegroundColor(w, theme.IdentifierColor)
 			fmt.Fprint(w, tok.Quoted())
 			resetColor(w)
-		} else if tok.Kind < tik.TokenKindOffset_Atoms {
+		} else if tok.Kind < token.TokenKindOffset_Atoms {
 			setForegroundColor(w, theme.PunctuationColor)
 			fmt.Fprint(w, tok.Text)
 			resetColor(w)

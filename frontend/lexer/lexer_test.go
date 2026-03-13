@@ -1,27 +1,27 @@
-package luther
+package lexer
 
 import (
 	"fmt"
 	"os"
 	"testing"
-	"woodybriggs/justmigrate/core/tik"
+	"woodybriggs/justmigrate/frontend/token"
 )
 
 type Case struct {
 	filename     string
 	input        string
-	expectedKind tik.TokenKind
+	expectedKind token.TokenKind
 	expectedText string
 }
 
 func TestNumericLiteral(t *testing.T) {
 
 	cases := []Case{
-		{input: "1", expectedText: "1", expectedKind: tik.TokenKind_IntegerNumericLiteral},
-		{input: "1.1", expectedText: "1.1", expectedKind: tik.TokenKind_FloatNumericLiteral},
-		{input: "1.1e+7", expectedText: "1.1e+7", expectedKind: tik.TokenKind_FloatNumericLiteral},
-		{input: "1.1e-7", expectedText: "1.1e-7", expectedKind: tik.TokenKind_FloatNumericLiteral},
-		{input: ".1e7", expectedText: ".1e7", expectedKind: tik.TokenKind_FloatNumericLiteral},
+		{input: "1", expectedText: "1", expectedKind: token.TokenKind_IntegerNumericLiteral},
+		{input: "1.1", expectedText: "1.1", expectedKind: token.TokenKind_FloatNumericLiteral},
+		{input: "1.1e+7", expectedText: "1.1e+7", expectedKind: token.TokenKind_FloatNumericLiteral},
+		{input: "1.1e-7", expectedText: "1.1e-7", expectedKind: token.TokenKind_FloatNumericLiteral},
+		{input: ".1e7", expectedText: ".1e7", expectedKind: token.TokenKind_FloatNumericLiteral},
 	}
 
 	for _, cas := range cases {

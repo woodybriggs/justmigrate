@@ -6,10 +6,10 @@ import (
 	"os"
 	"slices"
 	"unsafe"
-	"woodybriggs/justmigrate/core/ast"
-	"woodybriggs/justmigrate/core/formatter"
-	"woodybriggs/justmigrate/core/report"
+	"woodybriggs/justmigrate/backend/formatter"
 	"woodybriggs/justmigrate/datastructures"
+	"woodybriggs/justmigrate/frontend/ast"
+	"woodybriggs/justmigrate/frontend/report"
 
 	"golang.org/x/sys/cpu"
 )

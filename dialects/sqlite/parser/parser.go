@@ -1,14 +1,14 @@
-package sqlite
+package parser
 
 import (
 	"errors"
 	"fmt"
 	"strconv"
-	"woodybriggs/justmigrate/core/ast"
-	"woodybriggs/justmigrate/core/luther"
-	"woodybriggs/justmigrate/core/parser"
-	"woodybriggs/justmigrate/core/report"
-	"woodybriggs/justmigrate/core/tik"
+	"woodybriggs/justmigrate/frontend/ast"
+	"woodybriggs/justmigrate/frontend/lexer"
+	"woodybriggs/justmigrate/frontend/parser"
+	"woodybriggs/justmigrate/frontend/report"
+	"woodybriggs/justmigrate/frontend/token"
 )
 
 var ErrNotImplemented = errors.New("not implemented")
@@ -17,10 +17,9 @@ type SqliteParser struct {
 	*parser.Parser
 }
 
-func NewSqliteParser(lexer *luther.Lexer) *SqliteParser {
-	core := parser.NewParser(lexer)
+func NewSqliteParser(lexer *lexer.Lexer) *SqliteParser {
 	return &SqliteParser{
-		Parser: core,
+		Parser: parser.NewParser(lexer),
 	}
 }
 
@@ -86,11 +85,11 @@ func (p *SqliteParser) TableConstraint() ast.TableConstraint {
 	}
 
 	switch p.Current().Kind {
-	case tik.TokenKind_Keyword_PRIMARY:
+	case token.TokenKind_Keyword_PRIMARY:
 		return p.TableConstraint_PrimaryKey(constraintName)
-	case tik.TokenKind_Keyword_FOREIGN:
+	case token.TokenKind_Keyword_FOREIGN:
 		return p.TableConstraint_ForeignKey(constraintName)
-	case tik.TokenKind_Keyword_CHECK:
+	case token.TokenKind_Keyword_CHECK:
 		return p.TableConstraint_Check(constraintName)
 	default:
 		err := report.
@@ -108,8 +107,8 @@ func (p *SqliteParser) TableConstraint_PrimaryKey(constraintName *ast.Constraint
 
 	var autoincrement *ast.Keyword = nil
 
-	primaryKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_PRIMARY))
-	keyKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_KEY))
+	primaryKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_PRIMARY))
+	keyKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_KEY))
 	lParen := p.Expect('(')
 
 	indexedCols := []ast.IndexedColumn{}
@@ -118,7 +117,7 @@ func (p *SqliteParser) TableConstraint_PrimaryKey(constraintName *ast.Constraint
 	indexedCol := p.IndexedColumn(false)
 	indexedCols = append(indexedCols, indexedCol)
 
-	if p.Current().Kind == tik.TokenKind_Keyword_AUTOINCREMENT {
+	if p.Current().Kind == token.TokenKind_Keyword_AUTOINCREMENT {
 		autoincrement = ast.MakeKeyword(p.Current())
 		p.Advance()
 	}
@@ -181,8 +180,8 @@ func (p *SqliteParser) TableConstraint_ForeignKey(constraintName *ast.Constraint
 	p.PushParseContext("foreign key table constraint")
 	defer p.PopParseContext()
 
-	foreignKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_FOREIGN))
-	keyKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_KEY))
+	foreignKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_FOREIGN))
+	keyKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_KEY))
 
 	lParen := p.Expect('(')
 
@@ -215,7 +214,7 @@ func (p *SqliteParser) TableConstraint_ForeignKey(constraintName *ast.Constraint
 
 func (p *SqliteParser) ForeignKeyClause() *ast.ForeignKeyClause {
 
-	referencesKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_REFERENCES))
+	referencesKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_REFERENCES))
 
 	foreignTable := p.CatalogObjectIdentifier()
 
@@ -242,15 +241,15 @@ func (p *SqliteParser) ForeignKeyClause() *ast.ForeignKeyClause {
 	actions := []ast.ForeignKeyAction{}
 
 	for !p.EndOfFile() {
-		if p.Current().Kind == tik.TokenKind_Keyword_ON {
+		if p.Current().Kind == token.TokenKind_Keyword_ON {
 			action := p.ForeignKeyAction()
 			actions = append(actions, action)
-		} else if p.Current().Kind == tik.TokenKind_Keyword_MATCH {
+		} else if p.Current().Kind == token.TokenKind_Keyword_MATCH {
 			ident := p.Identifier()
 			matchName = &ident
-		} else if p.Current().Kind == tik.TokenKind_Keyword_NOT {
+		} else if p.Current().Kind == token.TokenKind_Keyword_NOT {
 			deferrable = p.ForeignKeyDeferrable()
-		} else if p.Current().Kind == tik.TokenKind_Keyword_DEFERRABLE {
+		} else if p.Current().Kind == token.TokenKind_Keyword_DEFERRABLE {
 			deferrable = p.ForeignKeyDeferrable()
 		} else {
 			break
@@ -270,19 +269,19 @@ func (p *SqliteParser) ForeignKeyClause() *ast.ForeignKeyClause {
 }
 
 func (p *SqliteParser) ForeignKeyAction() ast.ForeignKeyAction {
-	onKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_ON))
+	onKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_ON))
 
 	switch p.Current().Kind {
-	case tik.TokenKind_Keyword_UPDATE:
-		updateKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_UPDATE))
+	case token.TokenKind_Keyword_UPDATE:
+		updateKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_UPDATE))
 		do := p.ForeignKeyActionDo()
 		return ast.MakeForeignKeyUpdateAction(
 			onKeyword,
 			updateKeyword,
 			do,
 		)
-	case tik.TokenKind_Keyword_DELETE:
-		deleteKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_DELETE))
+	case token.TokenKind_Keyword_DELETE:
+		deleteKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_DELETE))
 		do := p.ForeignKeyActionDo()
 		return ast.MakeForeignKeyDeleteAction(
 			onKeyword,
@@ -303,14 +302,14 @@ func (p *SqliteParser) ForeignKeyAction() ast.ForeignKeyAction {
 func (p *SqliteParser) ForeignKeyActionDo() ast.ForeignKeyActionDo {
 
 	switch p.Current().Kind {
-	case tik.TokenKind_Keyword_SET:
-		setKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_SET))
+	case token.TokenKind_Keyword_SET:
+		setKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_SET))
 		switch p.Current().Kind {
-		case tik.TokenKind_Keyword_NULL:
-			nullKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_NULL))
+		case token.TokenKind_Keyword_NULL:
+			nullKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_NULL))
 			return ast.MakeForeignKeyActionSetNull(setKeyword, nullKeyword)
-		case tik.TokenKind_Keyword_DEFAULT:
-			defaultKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_DEFAULT))
+		case token.TokenKind_Keyword_DEFAULT:
+			defaultKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_DEFAULT))
 			return ast.MakeForeignKeyActionSetDefault(setKeyword, defaultKeyword)
 		default:
 			p.ReportError(
@@ -321,15 +320,15 @@ func (p *SqliteParser) ForeignKeyActionDo() ast.ForeignKeyActionDo {
 			)
 			return nil
 		}
-	case tik.TokenKind_Keyword_NO:
-		noKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_NO))
-		actionKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_ACTION))
+	case token.TokenKind_Keyword_NO:
+		noKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_NO))
+		actionKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_ACTION))
 		return ast.MakeForeignKeyActionNoAction(noKeyword, actionKeyword)
-	case tik.TokenKind_Keyword_RESTRICT:
-		restrictKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_RESTRICT))
+	case token.TokenKind_Keyword_RESTRICT:
+		restrictKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_RESTRICT))
 		return ast.MakeForeignKeyActionRestrict(restrictKeyword)
-	case tik.TokenKind_Keyword_CASCADE:
-		cascadeKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_CASCADE))
+	case token.TokenKind_Keyword_CASCADE:
+		cascadeKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_CASCADE))
 		return ast.MakeForeignKeyActionCascade(cascadeKeyword)
 	default:
 		p.ReportError(
@@ -344,24 +343,24 @@ func (p *SqliteParser) ForeignKeyActionDo() ast.ForeignKeyActionDo {
 
 func (p *SqliteParser) ForeignKeyDeferrable() *ast.ForeignKeyDeferrable {
 	var notKeyword *ast.Keyword = nil
-	if p.Current().Kind == tik.TokenKind_Keyword_NOT {
+	if p.Current().Kind == token.TokenKind_Keyword_NOT {
 		notKeyword = ast.MakeKeyword(p.Current())
 		p.Advance()
 	}
 
-	deferrableKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_DEFERRABLE))
+	deferrableKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_DEFERRABLE))
 
 	var initiallyKeyword *ast.Keyword = nil
 	var initiallyValue *ast.Keyword = nil
-	if p.Current().Kind == tik.TokenKind_Keyword_INITIALLY {
+	if p.Current().Kind == token.TokenKind_Keyword_INITIALLY {
 		initiallyKeyword = ast.MakeKeyword(p.Current())
 		p.Advance()
 
 		switch p.Current().Kind {
-		case tik.TokenKind_Keyword_DEFERRED:
+		case token.TokenKind_Keyword_DEFERRED:
 			initiallyValue = ast.MakeKeyword(p.Current())
 			p.Advance()
-		case tik.TokenKind_Keyword_IMMEDIATE:
+		case token.TokenKind_Keyword_IMMEDIATE:
 			initiallyValue = ast.MakeKeyword(p.Current())
 			p.Advance()
 		default:
@@ -385,7 +384,7 @@ func (p *SqliteParser) ForeignKeyDeferrable() *ast.ForeignKeyDeferrable {
 }
 
 func (p *SqliteParser) TableConstraint_Check(constraintName *ast.ConstraintName) ast.TableConstraint {
-	checkKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_CHECK))
+	checkKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_CHECK))
 
 	lParen := p.Expect('(')
 
@@ -444,7 +443,7 @@ func (p *SqliteParser) ColumnDefinition() *ast.ColumnDefinition {
 }
 
 func (p *SqliteParser) MaybeTypeName() *ast.TypeName {
-	if p.Current().Kind != tik.TokenKind_Identifier {
+	if p.Current().Kind != token.TokenKind_Identifier {
 		return nil
 	}
 
@@ -473,7 +472,7 @@ func (p *SqliteParser) SignedNumber() ast.NumericLiteral {
 		p.Advance()
 	}
 
-	var negate *tik.Token = nil
+	var negate *token.Token = nil
 	if p.Current().Kind == '-' {
 		tok := p.Current()
 		negate = &tok
@@ -483,11 +482,11 @@ func (p *SqliteParser) SignedNumber() ast.NumericLiteral {
 	return p.LiteralNumericLiteral(negate)
 }
 
-func (p *SqliteParser) LiteralNumericLiteral(negate *tik.Token) ast.NumericLiteral {
-	switch token := p.Current(); token.Kind {
-	case tik.TokenKind_IntegerNumericLiteral:
+func (p *SqliteParser) LiteralNumericLiteral(negate *token.Token) ast.NumericLiteral {
+	switch tok := p.Current(); tok.Kind {
+	case token.TokenKind_IntegerNumericLiteral:
 		p.Advance()
-		val, err := strconv.ParseInt(token.Text, 10, 64)
+		val, err := strconv.ParseInt(tok.Text, 10, 64)
 		if err != nil {
 			p.Parser.ReportError(
 				report.NewReport("parse error").
@@ -495,27 +494,27 @@ func (p *SqliteParser) LiteralNumericLiteral(negate *tik.Token) ast.NumericLiter
 					WithLabels(report.LabelFromToken(p.Current(), "here")).
 					WithNotes(err.Error()),
 			)
-			return ast.MakeLiteralSignedInteger(token, 0)
+			return ast.MakeLiteralSignedInteger(tok, 0)
 		}
 		if negate != nil {
 			val = val * -1
 		}
-		return ast.MakeLiteralSignedInteger(token, val)
-	case tik.TokenKind_FloatNumericLiteral:
+		return ast.MakeLiteralSignedInteger(tok, val)
+	case token.TokenKind_FloatNumericLiteral:
 		p.Advance()
-		val, err := strconv.ParseFloat(token.Text, 64)
+		val, err := strconv.ParseFloat(tok.Text, 64)
 		if err != nil {
 			p.Parser.ReportError(report.NewReport("parse error").
 				WithLocation(p.Current().FileLoc).
 				WithNotes(err.Error()).
 				WithLabels(report.LabelFromToken(p.Current(), "here")),
 			)
-			return ast.MakeLiteralFloat(token, 0)
+			return ast.MakeLiteralFloat(tok, 0)
 		}
 		if negate != nil {
 			val = val * -1
 		}
-		return ast.MakeLiteralFloat(token, val)
+		return ast.MakeLiteralFloat(tok, val)
 	default:
 		p.ReportError(report.NewReport("parse error").
 			WithLocation(p.Current().FileLoc).
@@ -524,13 +523,13 @@ func (p *SqliteParser) LiteralNumericLiteral(negate *tik.Token) ast.NumericLiter
 		)
 
 		// if the next token is a numeric literal, then we can skip the token and try parse again
-		if p.Peeked().Kind == tik.TokenKind_IntegerNumericLiteral || p.Peeked().Kind == tik.TokenKind_FloatNumericLiteral {
+		if p.Peeked().Kind == token.TokenKind_IntegerNumericLiteral || p.Peeked().Kind == token.TokenKind_FloatNumericLiteral {
 			p.Advance()
 			return p.LiteralNumericLiteral(negate)
 		}
 
 		// otherwise synthesize the node with 0 value
-		return ast.MakeLiteralSignedInteger(token, 0)
+		return ast.MakeLiteralSignedInteger(tok, 0)
 	}
 }
 
@@ -549,42 +548,42 @@ func (p *SqliteParser) ColumnConstraints() []ast.ColumnConstraint {
 	return result
 }
 
-func isTableConstraintStartingToken(token tik.Token) bool {
-	switch token.Kind {
-	case tik.TokenKind_Keyword_CONSTRAINT:
+func isTableConstraintStartingToken(tok token.Token) bool {
+	switch tok.Kind {
+	case token.TokenKind_Keyword_CONSTRAINT:
 		return true
-	case tik.TokenKind_Keyword_PRIMARY:
+	case token.TokenKind_Keyword_PRIMARY:
 		return true
-	case tik.TokenKind_Keyword_UNIQUE:
+	case token.TokenKind_Keyword_UNIQUE:
 		return true
-	case tik.TokenKind_Keyword_CHECK:
+	case token.TokenKind_Keyword_CHECK:
 		return true
-	case tik.TokenKind_Keyword_FOREIGN:
+	case token.TokenKind_Keyword_FOREIGN:
 		return true
 	default:
 		return false
 	}
 }
 
-func isColumnConstraintStartingToken(token tik.Token) bool {
-	switch token.Kind {
-	case tik.TokenKind_Keyword_CONSTRAINT:
+func isColumnConstraintStartingToken(tok token.Token) bool {
+	switch tok.Kind {
+	case token.TokenKind_Keyword_CONSTRAINT:
 		return true
-	case tik.TokenKind_Keyword_PRIMARY:
+	case token.TokenKind_Keyword_PRIMARY:
 		return true
-	case tik.TokenKind_Keyword_NOT:
+	case token.TokenKind_Keyword_NOT:
 		return true
-	case tik.TokenKind_Keyword_DEFAULT:
+	case token.TokenKind_Keyword_DEFAULT:
 		return true
-	case tik.TokenKind_Keyword_UNIQUE:
+	case token.TokenKind_Keyword_UNIQUE:
 		return true
-	case tik.TokenKind_Keyword_COLLATE:
+	case token.TokenKind_Keyword_COLLATE:
 		return true
-	case tik.TokenKind_Keyword_CHECK:
+	case token.TokenKind_Keyword_CHECK:
 		return true
-	case tik.TokenKind_Keyword_AS:
+	case token.TokenKind_Keyword_AS:
 		return true
-	case tik.TokenKind_Keyword_GENERATED:
+	case token.TokenKind_Keyword_GENERATED:
 		return true
 	default:
 		return false
@@ -598,23 +597,23 @@ func (p *SqliteParser) ColumnConstraint() ast.ColumnConstraint {
 	constraintName := p.MaybeConstraintName()
 
 	switch p.Current().Kind {
-	case tik.TokenKind_Keyword_PRIMARY:
+	case token.TokenKind_Keyword_PRIMARY:
 		return p.ColumnConstraint_PrimaryKey(constraintName)
-	case tik.TokenKind_Keyword_REFERENCES:
+	case token.TokenKind_Keyword_REFERENCES:
 		return p.ColumnConstraint_ForeignKey(constraintName)
-	case tik.TokenKind_Keyword_NOT:
+	case token.TokenKind_Keyword_NOT:
 		return p.ColumnConstraint_NotNull(constraintName)
-	case tik.TokenKind_Keyword_DEFAULT:
+	case token.TokenKind_Keyword_DEFAULT:
 		return p.ColumnConstraint_Default(constraintName)
-		//	case tik.TokenKind_Keyword_UNIQUE:
+		//	case token.TokenKind_Keyword_UNIQUE:
 		//		return p.ColumnConstraint_Unique(constraintName)
-		//	case tik.TokenKind_Keyword_COLLATE:
+		//	case token.TokenKind_Keyword_COLLATE:
 		//		return p.ColumnConstraint_Collate(constraintName)
-	case tik.TokenKind_Keyword_CHECK:
+	case token.TokenKind_Keyword_CHECK:
 		return p.ColumnConstraint_Check(constraintName)
-		//	case tik.TokenKind_Keyword_AS:
+		//	case token.TokenKind_Keyword_AS:
 		//		return p.ColumnConstraint_Generated(constraintName)
-		//	case tik.TokenKind_Keyword_GENERATED:
+		//	case token.TokenKind_Keyword_GENERATED:
 		//		return p.ColumnConstraint_Generated(constraintName)
 	default:
 		{
@@ -636,7 +635,7 @@ func (p *SqliteParser) ColumnConstraint() ast.ColumnConstraint {
 			return ast.MakeColumnConstraintCheck(
 				constraintName,
 				ast.Keyword{Text: "CHECK"},
-				ast.MakeLiteralNull(tik.Token{Text: "NULL"}),
+				ast.MakeLiteralNull(token.Token{Text: "NULL"}),
 			)
 		}
 	}
@@ -655,14 +654,14 @@ func (p *SqliteParser) ColumnConstraint_PrimaryKey(constraintName *ast.Constrain
 	p.PushParseContext("primary key column constraint")
 	defer p.PopParseContext()
 
-	primaryKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_PRIMARY))
-	keyKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_KEY))
+	primaryKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_PRIMARY))
+	keyKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_KEY))
 
 	order := p.MaybeOrderKeyword()
 	conflictClause := p.MaybeConflictClause()
 
 	var autoincrement *ast.Keyword = nil
-	if p.Current().Kind == tik.TokenKind_Keyword_AUTOINCREMENT {
+	if p.Current().Kind == token.TokenKind_Keyword_AUTOINCREMENT {
 		autoincrement = ast.MakeKeyword(p.Current())
 		p.Advance()
 	}
@@ -681,8 +680,8 @@ func (p *SqliteParser) ColumnConstraint_NotNull(constraintName *ast.ConstraintNa
 	p.PushParseContext("not null column constraint")
 	defer p.PopParseContext()
 
-	notKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_NOT))
-	nullKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_NULL))
+	notKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_NOT))
+	nullKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_NULL))
 
 	conflictClause := p.MaybeConflictClause()
 
@@ -698,7 +697,7 @@ func (p *SqliteParser) ColumnConstraint_Default(constraintName *ast.ConstraintNa
 	p.PushParseContext("default column constraint")
 	defer p.PopParseContext()
 
-	defaultKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_DEFAULT))
+	defaultKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_DEFAULT))
 
 	if p.Current().Kind == '(' {
 		p.Advance()
@@ -731,7 +730,7 @@ func (p *SqliteParser) ColumnConstraint_Check(constraintName *ast.ConstraintName
 	p.PushParseContext("column constraint check")
 	defer p.PopParseContext()
 
-	checkKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_CHECK))
+	checkKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_CHECK))
 	expr := p.Expr(0)
 	return ast.MakeColumnConstraintCheck(constraintName, checkKeyword, expr)
 }
@@ -741,7 +740,7 @@ func (p *SqliteParser) MaybeConstraintName() *ast.ConstraintName {
 	defer p.PopParseContext()
 
 	// we may or may not have CONSTRAINT keyword here so have a look-y and check-y
-	if p.Current().Kind != tik.TokenKind_Keyword_CONSTRAINT {
+	if p.Current().Kind != token.TokenKind_Keyword_CONSTRAINT {
 		return nil
 	}
 	constraintKeyword := ast.Keyword(p.Current())
@@ -756,20 +755,20 @@ func (p *SqliteParser) MaybeConstraintName() *ast.ConstraintName {
 }
 
 func (p *SqliteParser) MaybeConflictClause() *ast.ConflictClause {
-	if p.Current().Kind != tik.TokenKind_Keyword_ON {
+	if p.Current().Kind != token.TokenKind_Keyword_ON {
 		return nil
 	}
 	onKeyword := ast.Keyword(p.Current())
 	p.Advance()
 
-	conflictKeyword := ast.Keyword(p.Expect(tik.TokenKind_Keyword_CONFLICT))
+	conflictKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_CONFLICT))
 
 	switch p.Current().Kind {
-	case tik.TokenKind_Keyword_ROLLBACK,
-		tik.TokenKind_Keyword_ABORT,
-		tik.TokenKind_Keyword_FAIL,
-		tik.TokenKind_Keyword_IGNORE,
-		tik.TokenKind_Keyword_REPLACE:
+	case token.TokenKind_Keyword_ROLLBACK,
+		token.TokenKind_Keyword_ABORT,
+		token.TokenKind_Keyword_FAIL,
+		token.TokenKind_Keyword_IGNORE,
+		token.TokenKind_Keyword_REPLACE:
 		{
 			actionKeyword := ast.Keyword(p.Current())
 			return ast.MakeConflictClause(
@@ -795,9 +794,9 @@ func (p *SqliteParser) MaybeConflictClause() *ast.ConflictClause {
 
 func (p *SqliteParser) MaybeOrderKeyword() *ast.Keyword {
 	switch p.Current().Kind {
-	case tik.TokenKind_Keyword_ASC:
+	case token.TokenKind_Keyword_ASC:
 		fallthrough
-	case tik.TokenKind_Keyword_DESC:
+	case token.TokenKind_Keyword_DESC:
 		return ast.MakeKeyword(p.Current())
 	default:
 		return nil
@@ -810,14 +809,14 @@ func (p *SqliteParser) Expr(minBindingPower int) ast.Expr {
 
 func (p *SqliteParser) Term() ast.Expr {
 	switch p.Current().Kind {
-	case tik.TokenKind_StringLiteral:
+	case token.TokenKind_StringLiteral:
 		result := &ast.LiteralString{
 			Token: p.Current(),
 			Value: p.Current().Text,
 		}
 		p.Advance()
 		return result
-	case tik.TokenKind_Identifier:
+	case token.TokenKind_Identifier:
 		result := ast.Identifier(p.Current())
 		p.Advance()
 		return &result
@@ -826,8 +825,8 @@ func (p *SqliteParser) Term() ast.Expr {
 	}
 }
 
-func (p *SqliteParser) OperatorBindingPower(token tik.Token) (bp ast.BindingPower, found bool) {
-	switch token.Kind {
+func (p *SqliteParser) OperatorBindingPower(tok token.Token) (bp ast.BindingPower, found bool) {
+	switch tok.Kind {
 	case '+':
 		return ast.BindingPower{L: 100, R: 101}, true
 	default:

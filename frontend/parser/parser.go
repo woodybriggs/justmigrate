@@ -5,36 +5,36 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"woodybriggs/justmigrate/core/ast"
-	"woodybriggs/justmigrate/core/luther"
-	"woodybriggs/justmigrate/core/report"
-	"woodybriggs/justmigrate/core/tik"
 	"woodybriggs/justmigrate/datastructures"
+	"woodybriggs/justmigrate/frontend/ast"
+	"woodybriggs/justmigrate/frontend/lexer"
+	"woodybriggs/justmigrate/frontend/report"
+	"woodybriggs/justmigrate/frontend/token"
 )
 
 type ParseContext struct {
 	Name          string
-	StartingToken tik.Token
-	EndingToken   tik.Token
+	StartingToken token.Token
+	EndingToken   token.Token
 }
 
 type Parser struct {
-	lexer        *luther.Lexer
-	currentToken tik.Token
-	peekedToken  tik.Token
+	lexer        *lexer.Lexer
+	currentToken token.Token
+	peekedToken  token.Token
 
-	errors   map[tik.TextRange]report.Report
-	warnings map[tik.TextRange]report.Report
+	errors   map[token.TextRange]report.Report
+	warnings map[token.TextRange]report.Report
 
 	parseContext datastructures.Stack[ParseContext]
 }
 
-func NewParser(lexer *luther.Lexer) *Parser {
+func NewParser(lexer *lexer.Lexer) *Parser {
 
 	result := &Parser{
 		lexer:        lexer,
-		errors:       map[tik.TextRange]report.Report{},
-		warnings:     map[tik.TextRange]report.Report{},
+		errors:       map[token.TextRange]report.Report{},
+		warnings:     map[token.TextRange]report.Report{},
 		parseContext: datastructures.Stack[ParseContext]{},
 	}
 
@@ -62,7 +62,7 @@ func (p *Parser) Advance() {
 	p.peekedToken = p.lexer.PeekToken()
 }
 
-func (p *Parser) Expect(kind tik.TokenKind) tik.Token {
+func (p *Parser) Expect(kind token.TokenKind) token.Token {
 	if p.currentToken.Kind == kind {
 		token := p.currentToken
 		p.Advance()
@@ -111,12 +111,12 @@ func (p *Parser) Expect(kind tik.TokenKind) tik.Token {
 		return realToken
 	}
 
-	costSynthesis := tik.Token{Kind: kind}.InsertionCost()
+	costSynthesis := token.Token{Kind: kind}.InsertionCost()
 	costDeletion := p.currentToken.DeletionCost()
 
 	if costSynthesis <= costDeletion {
 		// p.Advance()
-		return tik.Token{
+		return token.Token{
 			Kind: kind,
 		}
 	}
@@ -129,11 +129,11 @@ func (p *Parser) Expect(kind tik.TokenKind) tik.Token {
 	return p.currentToken
 }
 
-func (p *Parser) Current() tik.Token {
+func (p *Parser) Current() token.Token {
 	return p.currentToken
 }
 
-func (p *Parser) Peeked() tik.Token {
+func (p *Parser) Peeked() token.Token {
 	return p.peekedToken
 }
 
@@ -150,7 +150,7 @@ func (p *Parser) ReportWarning(report *report.Report) {
 	p.warnings[p.currentToken.SourceRange] = *report
 }
 
-func (p *Parser) Synchronize(syncTokens []tik.TokenKind) {
+func (p *Parser) Synchronize(syncTokens []token.TokenKind) {
 	for !p.lexer.Eof() {
 		if v := slices.Index(syncTokens, p.currentToken.Kind); v > -1 {
 			p.Advance()
@@ -179,7 +179,7 @@ func (p *Parser) PopParseContext() {
 }
 
 func (p *Parser) EndOfFile() bool {
-	return p.Current().Kind == tik.TokenKind_EOF
+	return p.Current().Kind == token.TokenKind_EOF
 }
 
 func (p *Parser) CatalogObjectIdentifier() *ast.CatalogObjectIdentifier {
@@ -188,7 +188,7 @@ func (p *Parser) CatalogObjectIdentifier() *ast.CatalogObjectIdentifier {
 
 	schemaOrTable := p.Identifier()
 
-	if p.Current().Kind != tik.TokenKind_Period {
+	if p.Current().Kind != token.TokenKind_Period {
 		tableName := schemaOrTable
 		return ast.MakeCatalogObjectIdentifier(nil, tableName)
 	}
@@ -206,12 +206,12 @@ func (p *Parser) CatalogObjectIdentifier() *ast.CatalogObjectIdentifier {
 func (p *Parser) Identifier() ast.Identifier {
 	p.PushParseContext("identifier")
 	defer p.PopParseContext()
-	return ast.Identifier(p.Expect(tik.TokenKind_Identifier))
+	return ast.Identifier(p.Expect(token.TokenKind_Identifier))
 }
 
 func (p *Parser) MaybeCollation() *ast.Collation {
 
-	if p.Current().Kind != tik.TokenKind_Keyword_COLLATE {
+	if p.Current().Kind != token.TokenKind_Keyword_COLLATE {
 		return nil
 	}
 	collateKeyword := ast.Keyword(p.Current())
@@ -225,7 +225,7 @@ func (p *Parser) MaybeCollation() *ast.Collation {
 
 type PrattParser interface {
 	Term() ast.Expr
-	OperatorBindingPower(token tik.Token) (bp ast.BindingPower, found bool)
+	OperatorBindingPower(token token.Token) (bp ast.BindingPower, found bool)
 }
 
 func (p *Parser) Expr(

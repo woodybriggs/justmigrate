@@ -1,8 +1,8 @@
 package generator
 
 import (
-	"woodybriggs/justmigrate/core/ast"
-	"woodybriggs/justmigrate/core/formatter"
+	"woodybriggs/justmigrate/backend/formatter"
+	"woodybriggs/justmigrate/frontend/ast"
 )
 
 type SqliteFormatter struct {

@@ -1,6 +1,6 @@
 package diff
 
-import "woodybriggs/justmigrate/core/ast"
+import "woodybriggs/justmigrate/frontend/ast"
 
 type Op interface {
 	op()

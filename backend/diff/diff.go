@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"woodybriggs/justmigrate/core/ast"
-	"woodybriggs/justmigrate/core/prompt"
+	"woodybriggs/justmigrate/frontend/ast"
+	"woodybriggs/justmigrate/prompt"
 )
 
 type Diff struct{}
