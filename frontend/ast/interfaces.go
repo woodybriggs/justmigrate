@@ -35,6 +35,7 @@ type TableConstraint interface {
 func (node *TableConstraint_Check) nodeTableConstraint()      {}
 func (node *TableConstraint_PrimaryKey) nodeTableConstraint() {}
 func (node *TableConstraint_ForeignKey) nodeTableConstraint() {}
+func (node *TableConstraint_Unique) nodeTableConstraint()     {}
 func (node *ParseError) nodeTableConstraint()                 {}
 
 type ColumnConstraint interface {

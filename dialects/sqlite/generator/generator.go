@@ -208,6 +208,39 @@ func (f *SqliteFormatter) VisitColumnConstraintForeignKey(node *ast.ColumnConstr
 	f.VisitForeignKeyClause(&node.FkClause)
 }
 
+func (f *SqliteFormatter) VisitTableConstraintUnique(node *ast.TableConstraint_Unique) {
+	if node.Name != nil {
+		f.Keyword("CONSTRAINT")
+		f.Space()
+		node.Name.Name.Accept(f)
+	}
+
+	f.Keyword("UNIQUE")
+	f.Space()
+
+	f.Rune('(')
+	for i, indexedCol := range node.IndexedColumns {
+
+		f.VisitIndexedColumn(&indexedCol)
+
+		if i != len(node.IndexedColumns)-1 {
+			f.Rune(',')
+			f.Space()
+		}
+	}
+	f.Rune(')')
+
+	if node.ConflictClause != nil {
+		f.Space()
+		f.Keyword("ON")
+		f.Space()
+		f.Keyword("CONFLICT")
+		f.Space()
+		f.Keyword(node.ConflictClause.Action.Text)
+		f.Space()
+	}
+}
+
 func (f *SqliteFormatter) VisitTableConstraintPrimaryKey(node *ast.TableConstraint_PrimaryKey) {
 	if node.Name != nil {
 		f.Keyword("CONSTRAINT")

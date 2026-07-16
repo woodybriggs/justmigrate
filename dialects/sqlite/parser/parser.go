@@ -48,7 +48,8 @@ func (p *SqliteParser) TableConstraints() []ast.TableConstraint {
 
 	result := []ast.TableConstraint{}
 
-	for !p.EndOfFile() {
+	loopCount := 0
+	for !p.EndOfFile() && loopCount < 1024 {
 		if p.Current().Kind == ')' {
 			break
 		} else if p.Current().Kind == ',' {
@@ -58,6 +59,7 @@ func (p *SqliteParser) TableConstraints() []ast.TableConstraint {
 			tableConstraint := p.TableConstraint()
 			result = append(result, tableConstraint)
 		}
+		loopCount++
 	}
 
 	return result
@@ -161,7 +163,7 @@ func (p *SqliteParser) IndexedColumn(allowExpressions bool) ast.IndexedColumn {
 	if allowExpressions {
 		expr = p.Expr(0)
 	} else {
-		tmp := p.Identifier()
+		tmp := p.Identifier(true)
 		expr = &tmp
 	}
 
@@ -193,7 +195,7 @@ func (p *SqliteParser) TableConstraint_ForeignKey(constraintName *ast.Constraint
 		} else if p.Current().Kind == ')' {
 			break
 		} else {
-			columnName := p.Identifier()
+			columnName := p.Identifier(true)
 			columnNames = append(columnNames, columnName)
 		}
 	}
@@ -229,7 +231,7 @@ func (p *SqliteParser) ForeignKeyClause() *ast.ForeignKeyClause {
 		} else if p.Current().Kind == ')' {
 			break
 		} else {
-			column := p.Identifier()
+			column := p.Identifier(true)
 			columns = append(columns, column)
 		}
 	}
@@ -245,7 +247,7 @@ func (p *SqliteParser) ForeignKeyClause() *ast.ForeignKeyClause {
 			action := p.ForeignKeyAction()
 			actions = append(actions, action)
 		} else if p.Current().Kind == token.TokenKind_Keyword_MATCH {
-			ident := p.Identifier()
+			ident := p.Identifier(true)
 			matchName = &ident
 		} else if p.Current().Kind == token.TokenKind_Keyword_NOT {
 			deferrable = p.ForeignKeyDeferrable()
@@ -411,7 +413,8 @@ func (p *SqliteParser) ColumnDefinitions() []ast.ColumnDefinition {
 
 	definitions := []ast.ColumnDefinition{}
 
-	for !p.EndOfFile() {
+	loopCount := 0
+	for !p.EndOfFile() && loopCount < 1024 {
 		if p.Current().Kind == ')' {
 			break
 		} else if isTableConstraintStartingToken(p.Current()) {
@@ -422,6 +425,8 @@ func (p *SqliteParser) ColumnDefinitions() []ast.ColumnDefinition {
 			columnDef := p.ColumnDefinition()
 			definitions = append(definitions, *columnDef)
 		}
+
+		loopCount++
 	}
 
 	return definitions
@@ -431,7 +436,7 @@ func (p *SqliteParser) ColumnDefinition() *ast.ColumnDefinition {
 	p.PushParseContext("column definition")
 	defer p.PopParseContext()
 
-	columnName := p.Identifier()
+	columnName := p.Identifier(true)
 	typeName := p.MaybeTypeName()
 	columnConstraints := p.ColumnConstraints()
 
@@ -447,7 +452,7 @@ func (p *SqliteParser) MaybeTypeName() *ast.TypeName {
 		return nil
 	}
 
-	name := p.Identifier()
+	name := p.Identifier(false)
 	var arg0 ast.NumericLiteral = nil
 	var arg1 ast.NumericLiteral = nil
 
@@ -605,10 +610,10 @@ func (p *SqliteParser) ColumnConstraint() ast.ColumnConstraint {
 		return p.ColumnConstraint_NotNull(constraintName)
 	case token.TokenKind_Keyword_DEFAULT:
 		return p.ColumnConstraint_Default(constraintName)
-		//	case token.TokenKind_Keyword_UNIQUE:
-		//		return p.ColumnConstraint_Unique(constraintName)
-		//	case token.TokenKind_Keyword_COLLATE:
-		//		return p.ColumnConstraint_Collate(constraintName)
+	case token.TokenKind_Keyword_UNIQUE:
+		return p.ColumnConstraint_Unique(constraintName)
+	case token.TokenKind_Keyword_COLLATE:
+		return p.ColumnConstraint_Collate(constraintName)
 	case token.TokenKind_Keyword_CHECK:
 		return p.ColumnConstraint_Check(constraintName)
 		//	case token.TokenKind_Keyword_AS:
@@ -722,6 +727,7 @@ func (p *SqliteParser) ColumnConstraint_Default(constraintName *ast.ConstraintNa
 		}
 		lit = ast.MakeParseError(err, tok)
 	}
+	p.Advance()
 
 	return ast.MakeColumnConstraintDefault(constraintName, defaultKeyword, lit)
 }
@@ -735,6 +741,33 @@ func (p *SqliteParser) ColumnConstraint_Check(constraintName *ast.ConstraintName
 	return ast.MakeColumnConstraintCheck(constraintName, checkKeyword, expr)
 }
 
+func (p *SqliteParser) ColumnConstraint_Unique(constraintName *ast.ConstraintName) *ast.ColumnConstraint_Unique {
+	p.PushParseContext("column constraint unique")
+	defer p.PopParseContext()
+
+	uniqueKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_UNIQUE))
+
+	conflictClause := p.MaybeConflictClause()
+
+	return ast.MakeColumnConstraintUnique(constraintName, uniqueKeyword, conflictClause)
+}
+
+func (p *SqliteParser) ColumnConstraint_Collate(constraintName *ast.ConstraintName) *ast.ColumnConstraint_Collate {
+	p.PushParseContext("column constraint collate")
+	defer p.PopParseContext()
+
+	collateKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_COLLATE))
+	name := p.Identifier(true)
+
+	return ast.MakeColumnConstraintCollate(
+		constraintName,
+		ast.MakeCollation(
+			collateKeyword,
+			name,
+		),
+	)
+}
+
 func (p *SqliteParser) MaybeConstraintName() *ast.ConstraintName {
 	p.PushParseContext("constraint name")
 	defer p.PopParseContext()
@@ -746,7 +779,7 @@ func (p *SqliteParser) MaybeConstraintName() *ast.ConstraintName {
 	constraintKeyword := ast.Keyword(p.Current())
 	p.Advance()
 
-	name := p.Identifier()
+	name := p.Identifier(true)
 
 	return &ast.ConstraintName{
 		ConstraintKeyword: constraintKeyword,
@@ -807,6 +840,19 @@ func (p *SqliteParser) Expr(minBindingPower int) ast.Expr {
 	return p.Parser.Expr(minBindingPower, p)
 }
 
+func (p *SqliteParser) BetweenExpr(minBindingPower int) ast.Expr {
+	lhs := p.Expr(0)
+	op := p.Current()
+	p.Expect(token.TokenKind_Keyword_AND)
+	rhs := p.Expr(0)
+
+	return ast.MakeBinaryOpExpr(
+		lhs,
+		op,
+		rhs,
+	)
+}
+
 func (p *SqliteParser) Term() ast.Expr {
 	switch p.Current().Kind {
 	case token.TokenKind_StringLiteral:
@@ -820,8 +866,29 @@ func (p *SqliteParser) Term() ast.Expr {
 		result := ast.Identifier(p.Current())
 		p.Advance()
 		return &result
+	case token.TokenKind_IntegerNumericLiteral:
+		result, err := ast.TokenToLiteral(p.Current())
+		if err != nil {
+			return ast.MakeParseError(err, p.Current())
+		}
+		p.Advance()
+		return result
+	case token.TokenKind_LParen:
+		p.Expect('(')
+		expr := p.Expr(0)
+		p.Expect(')')
+		return expr
 	default:
-		panic("expression type not handled")
+		panic(fmt.Sprint("expression type not handled", p.Current().DebugString()))
+	}
+}
+
+func (p *SqliteParser) OpParser(op token.Token) (func(bindingPower int) ast.Expr, bool) {
+	switch op.Kind {
+	case token.TokenKind_Keyword_BETWEEN:
+		return p.BetweenExpr, true
+	default:
+		return p.Expr, true
 	}
 }
 
@@ -829,6 +896,20 @@ func (p *SqliteParser) OperatorBindingPower(tok token.Token) (bp ast.BindingPowe
 	switch tok.Kind {
 	case '+':
 		return ast.BindingPower{L: 100, R: 101}, true
+	case '<':
+		return ast.BindingPower{L: 30, R: 31}, true
+	case '>':
+		return ast.BindingPower{L: 30, R: 31}, true
+	case token.TokenKind_lte:
+		return ast.BindingPower{L: 30, R: 31}, true
+	case token.TokenKind_gte:
+		return ast.BindingPower{L: 30, R: 31}, true
+	case '=':
+		return ast.BindingPower{L: 20, R: 21}, true
+	case token.TokenKind_Keyword_BETWEEN:
+		return ast.BindingPower{L: 20, R: 21}, true
+	case token.TokenKind_Keyword_OR:
+		return ast.BindingPower{L: 10, R: 11}, true
 	default:
 		return ast.BindingPower{}, false
 	}

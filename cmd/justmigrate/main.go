@@ -1,22 +1,16 @@
 package main
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 
-	"woodybriggs/justmigrate/backend/diff"
-	"woodybriggs/justmigrate/dialects/sqlite"
-	"woodybriggs/justmigrate/dialects/sqlite/generator"
+	schema "woodybriggs/justmigrate/backend/schema"
 	"woodybriggs/justmigrate/dialects/sqlite/parser"
 	"woodybriggs/justmigrate/frontend/ast"
 	"woodybriggs/justmigrate/frontend/lexer"
 	"woodybriggs/justmigrate/frontend/report"
-
-	_ "github.com/mattn/go-sqlite3"
 )
 
 var (
@@ -41,11 +35,6 @@ func assert(cond bool, err error) {
 	}
 }
 
-type Database interface {
-	Url() string
-	ExportDataDefinitions() (string, error)
-}
-
 func ShowErrors(errors []report.Report, w io.Writer) {
 	errorRenderer := report.Renderer{}
 	for _, report := range errors {
@@ -60,116 +49,128 @@ func ShowWarnings(warnings []report.Report, w io.Writer) {
 	}
 }
 
-func AstFromDatabase(database Database) (lexer.SourceCode, []ast.Statement, error) {
-	source, err := database.ExportDataDefinitions()
+func astFromReader(r io.Reader, sourceName string) (lexer.SourceCode, []ast.Statement, error) {
+	data, err := io.ReadAll(r)
 	if err != nil {
 		return lexer.SourceCode{}, nil, err
 	}
 
-	parser := parser.NewSqliteParser(lexer.NewLexer(
-		lexer.SourceCode{
-			FileName: database.Url(),
-			Raw:      []rune(source),
-		},
-	))
+	sourceCode := lexer.SourceCode{
+		FileName: sourceName,
+		Raw:      []rune(string(data)),
+	}
 
-	nodes := parser.Statements()
+	lexer := lexer.NewLexer(sourceCode)
+	parser := parser.NewSqliteParser(lexer)
+
+	statements := parser.Statements()
 	errors := parser.ErrorsAsErrorSlice()
 	if len(errors) > 0 {
-		return parser.Current().SourceCode, nil, &ParserErrors{
+		ShowErrors(parser.ErrorsAsReportSlice(), os.Stderr)
+
+		return sourceCode, nil, &ParserErrors{
 			Errs: errors,
 		}
 	}
 
-	// warnings := slices.Collect(maps.Values(parser.Warnings))
-	// if len(warnings) > 0 {
-	// 	ShowWarnings(warnings, os.Stderr)
-	// }
-
-	return parser.Parser.Current().SourceCode, nodes, nil
-}
-
-func AstFromFile(file *os.File) (lexer.SourceCode, []ast.Statement, error) {
-	lexer, err := lexer.NewLexerFromFile(file)
-	if err != nil {
-		return lexer.SourceCode, nil, err
-	}
-
-	parser := parser.NewSqliteParser(lexer)
-
-	nodes := parser.Statements()
-	errors := parser.ErrorsAsErrorSlice()
-	if len(errors) > 0 {
-		return lexer.SourceCode, nil, &ParserErrors{
-			Errs: parser.ErrorsAsErrorSlice(),
-		}
-	}
-
-	// warnings := slices.Collect(maps.Values(parser.Warnings))
-	// if len(warnings) > 0 {
-	// 	ShowWarnings(warnings, os.Stderr)
-	// }
-
-	return lexer.SourceCode, nodes, nil
+	return sourceCode, statements, nil
 }
 
 func main() {
 
 	var err error
 
-	databaseURL := "resources/database.db"
+	// load the current state of the connected database into ast
+	// databaseURL := "resources/database.db"
+	// conn, err := sql.Open("sqlite3", databaseURL)
+	// if err != nil {
+	// 	log.Panicln(err)
+	// }
 
-	conn, err := sql.Open("sqlite3", databaseURL)
+	// db := &sqlite.Sqlite{DB: conn, FileName: databaseURL}
+	// source, err := db.ExportDataDefinitions()
+	// if err != nil {
+	// 	fmt.Fprintf(os.Stderr, "unable to export data defintions from db %v", err)
+	// 	os.Exit(1)
+	// }
+
+	// dbSourceReader := strings.NewReader(source)
+	// _, srcAst, err := astFromReader(dbSourceReader, databaseURL)
+	// if err != nil {
+	// 	fmt.Fprintf(os.Stderr, "ast from database failed with err %v", err)
+	// 	os.Exit(1)
+	// }
+
+	// load the current state of the target schema file into ast
+	fileNameA := "./resources/two/a.sql"
+	fileA, err := os.Open(fileNameA)
 	if err != nil {
-		log.Panicln(err)
-	}
-
-	db := &sqlite.Sqlite{DB: conn, FileName: databaseURL}
-
-	fileName := "resources/schema.sql"
-	file, err := os.Open(fileName)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "open file failed with err %v", err)
+		fmt.Fprintf(os.Stderr, "open file failed with err %v\n", err)
 		os.Exit(1)
 	}
 
-	_, tgtAst, err := AstFromFile(file)
+	_, srcAst, err := astFromReader(fileA, fileNameA)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ast from file failed with err %v", err)
+		fmt.Fprintf(os.Stderr, "ast from file failed with err %v\n", err)
 		os.Exit(1)
 	}
 
-	_, srcAst, err := AstFromDatabase(db)
+	fileNameB := "./resources/two/b.sql"
+	fileB, err := os.Open(fileNameB)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ast from database failed with err %v", err)
+		fmt.Fprintf(os.Stderr, "open file failed with err %v\n", err)
 		os.Exit(1)
 	}
 
-	differ := diff.Diff{}
-
-	ops, err := differ.DiffSchema(srcAst, tgtAst)
+	_, tgtAst, err := astFromReader(fileB, fileNameB)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "diff schema failed with err %v", err)
+		fmt.Fprintf(os.Stderr, "ast from file failed with err %v\n", err)
 		os.Exit(1)
 	}
 
-	gen := generator.SqliteFormatter{}
-
-	ops, err = gen.Plan(srcAst, tgtAst, ops)
-
-	type multiError interface {
-		Error() string
-		Unwrap() []error
-	}
+	schemaA, err := schema.SchemaFromAst(srcAst)
 	if err != nil {
-		if errs, ok := errors.AsType[multiError](err); ok {
-			for _, report := range errs.Unwrap() {
-				fmt.Println(report)
-			}
-		}
+		fmt.Fprintf(os.Stderr, "invalid schema\n%v\n", err)
+		os.Exit(1)
 	}
 
-	for _, op := range ops {
-		fmt.Printf("%T, %+v\n", op, op)
+	schemaB, err := schema.SchemaFromAst(tgtAst)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid schema\n%v\n", err)
+		os.Exit(1)
 	}
+
+	_, _ = schemaA, schemaB
+
+	// perform a "diff" of the two ast and procude a set of transform ops
+	// differ := diff.Diff{}
+	// ops, err := differ.DiffSchema(srcAst, tgtAst)
+	// if err != nil {
+	// 	fmt.Fprintf(os.Stderr, "diff schema failed with err %v\n", err)
+	// 	os.Exit(1)
+	// }
+
+	// // validate, reoreder and optimize the ops
+	// {
+
+	// }
+
+	// // generate the schema changes needed from the ops
+	// gen := generator.SqliteFormatter{}
+	// ops, err = gen.Plan(srcAst, tgtAst, ops)
+	// type multiError interface {
+	// 	Error() string
+	// 	Unwrap() []error
+	// }
+	// if err != nil {
+	// 	if errs, ok := errors.AsType[multiError](err); ok {
+	// 		for _, report := range errs.Unwrap() {
+	// 			fmt.Println(report)
+	// 		}
+	// 	}
+	// }
+
+	// for _, op := range ops {
+	// 	fmt.Printf("%T, %+v\n", op, op)
+	// }
 }

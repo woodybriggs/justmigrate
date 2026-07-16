@@ -100,7 +100,7 @@ func (p *SqliteParser) CreateIndexStatement(isUnique bool) ast.Statement {
 
 	onKeyword := ast.Keyword(p.Expect(token.TokenKind_Keyword_ON))
 
-	tableName := p.Identifier()
+	tableName := p.Identifier(false)
 
 	lParen := p.Expect('(')
 

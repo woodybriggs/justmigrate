@@ -2,7 +2,8 @@ package schema
 
 import (
 	"errors"
-	"woodybriggs/justmigrate/core/ast"
+	"woodybriggs/justmigrate/frontend/ast"
+	"woodybriggs/justmigrate/frontend/report"
 )
 
 type Type struct {
@@ -12,86 +13,88 @@ type Type struct {
 	Args []ast.NumericLiteral
 }
 
-func TypeFromAst(typeName *ast.TypeName) *Type {
+func TypeFromAst(typeName *ast.TypeName) (*Type, error) {
 	if typeName == nil {
-		return nil
+		return nil, nil
 	}
 	return &Type{
 		TypeName: typeName,
 		Name:     typeName.Name.Text,
 		Args:     []ast.NumericLiteral{typeName.Arg0, typeName.Arg1},
-	}
+	}, nil
 }
 
-func PrimaryKeyFromColumnConstraint(constraint *ast.ColumnConstraint_PrimaryKey) *PrimaryKey {
-	panic(errors.New("not implemented"))
-}
-
-func ForeignKeyFromColumnConstraint(constraint *ast.ColumnConstraint_ForeignKey) *ForeignKey {
-	panic(errors.New("not implemented"))
+type GeneratedColumnConstraints struct {
+	Collate string
+	NotNull *ast.ColumnConstraint_NotNull
+	Checks  *Check
+	Unique  *ast.ColumnConstraint_Unique
 }
 
 type ColumnConstraints struct {
-	Collate     string
-	NotNull     bool
-	Unique      bool
-	Checks      []ast.Expr
-	FK          any
-	PK          any
-	Default     ast.Expr
-	GeneratedAs ast.Expr
+	Collate *CollateConstraint
+	NotNull *NotNull
+	Default *Default
+	Unique  *Unique
+	Check   *Check
+	FK      *ForeignKey
+	PK      *PrimaryKey
 }
 
-func ColumnConstraintsFromAst(constraints []ast.ColumnConstraint) *ColumnConstraints {
+func ColumnConstraintsFromAst(
+	table *Table,
+	column *Column,
+	constraints *ColumnConstraints,
+	astConstraints []ast.ColumnConstraint,
+) error {
 
-	var notNull bool
-	var unique bool
-	var collate string
-	var checks []ast.Expr
-	var defaultVal ast.Expr
-	var generatedAsExpr ast.Expr
-	var fk any
-	var pk *PrimaryKey
+	errs := []error{}
 
-	for _, constraint := range constraints {
-		switch typ := constraint.(type) {
-		case *ast.ColumnConstraint_Check:
-			checks = append(checks, typ.CheckExpr)
-		case *ast.ColumnConstraint_Collate:
-			collate = typ.CollationName.Text
+	for i := range astConstraints {
+		switch constraint := astConstraints[i].(type) {
 		case *ast.ColumnConstraint_Generated:
-			generatedAsExpr = typ.AsExpr
+			panic("we should not be here, we should already know if a column is generated and use GeneratedColumnFromColumnConstraintAst")
+		case *ast.ColumnConstraint_Check:
+			if err := CheckFromColumnConstraintAst(constraints, constraint); err != nil {
+				errs = append(errs, err)
+			}
+		case *ast.ColumnConstraint_Collate:
+			if err := CollateConstraintFromColumnConstraintAst(constraints, constraint); err != nil {
+				errs = append(errs, err)
+			}
 		case *ast.ColumnConstraint_NotNull:
-			notNull = true
+			if err := NotNullFromColumnConstraint(constraints, constraint); err != nil {
+				errs = append(errs, err)
+			}
 		case *ast.ColumnConstraint_Default:
-			defaultVal = typ.Default
+			if err := DefaultFromColumnConstraint(constraints, constraint); err != nil {
+				errs = append(errs, err)
+			}
 		case *ast.ColumnConstraint_Unique:
-			unique = true
+			if err := UniqueFromColumnConstraintAst(column, constraints, constraint); err != nil {
+				errs = append(errs, err)
+			}
 		case *ast.ColumnConstraint_PrimaryKey:
-			pk = PrimaryKeyFromColumnConstraint(typ)
+			if err := PrimaryKeyFromColumnConstraintAst(column, constraints, constraint); err != nil {
+				errs = append(errs, err)
+			}
 		case *ast.ColumnConstraint_ForeignKey:
-			fk = ForeignKeyFromColumnConstraint(typ)
+			if err := ForeignKeyFromColumnConstraintAst(column, constraints, constraint); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
 
-	return &ColumnConstraints{
-		Collate:     collate,
-		NotNull:     notNull,
-		Unique:      unique,
-		Checks:      checks,
-		PK:          pk,
-		FK:          fk,
-		GeneratedAs: generatedAsExpr,
-		Default:     defaultVal,
-	}
+	return errors.Join(errs...)
 }
 
-type Columnish interface {
+type ColumnLike interface {
 	column()
-}
+	GetName() *ast.Identifier
 
-func (genCol *GeneratedColumn) column() {}
-func (col *Column) column()             {}
+	GetConstraints() ColumnConstraints
+	Eq(any) bool
+}
 
 type GeneratedColumn struct {
 	ColumnDefinition *ast.ColumnDefinition
@@ -102,20 +105,119 @@ type GeneratedColumn struct {
 	ColumnConstraints
 }
 
+func (genCol *GeneratedColumn) column() {}
+
+func (c *GeneratedColumn) GetName() *ast.Identifier {
+	return &c.ColumnDefinition.ColumnName
+}
+
+func (c *GeneratedColumn) GetConstraints() ColumnConstraints {
+	return c.ColumnConstraints
+}
+
+func (c *GeneratedColumn) Eq(otherAny any) bool {
+	other, ok := otherAny.(*GeneratedColumn)
+	if !ok {
+		return false
+	}
+
+	return c.ColumnDefinition.Eq(other.ColumnDefinition)
+}
+
+func GeneratedColumnFromAst(table *Table, column *GeneratedColumn, colDef *ast.ColumnDefinition) (err error) {
+	column.ColumnDefinition = colDef
+	column.Name = colDef.ColumnName.String()
+	column.Type, err = TypeFromAst(colDef.TypeName)
+
+	err = GeneratedColumnConstraintsFromAst(table, column, &column.ColumnConstraints, colDef.ColumnConstraints)
+	return err
+}
+
+func GeneratedColumnConstraintsFromAst(table *Table, column *GeneratedColumn, constraints *ColumnConstraints, astConstraints []ast.ColumnConstraint) error {
+
+	errs := []error{}
+
+	for i := range astConstraints {
+		switch constraint := astConstraints[i].(type) {
+		// generated columns are not allowed to have default constraints
+		case *ast.ColumnConstraint_Default:
+			err := report.NewReport("invalid column definition").
+				WithLocation(constraint.DefaultKeyword.FileLoc).
+				WithMessage("generated column can not have a default value").
+				WithLabels(
+					report.LabelFromExpr(constraint.Default, "this default value"),
+				)
+			errs = append(errs, err)
+		// generated columns are not allowed to be part of primary keys
+		case *ast.ColumnConstraint_PrimaryKey:
+			err := report.NewReport("invalid column definition").
+				WithLocation(constraint.PrimaryKeyword.FileLoc).
+				WithMessage("generated column can not be part of a primary key constraint").
+				WithLabels(
+					report.LabelFromKeyword(constraint.PrimaryKeyword, "this primary key is not allowed"),
+				)
+			errs = append(errs, err)
+		case *ast.ColumnConstraint_Check:
+			if err := CheckFromColumnConstraintAst(constraints, constraint); err != nil {
+				errs = append(errs, err)
+			}
+		case *ast.ColumnConstraint_Collate:
+			if err := CollateConstraintFromColumnConstraintAst(constraints, constraint); err != nil {
+				errs = append(errs, err)
+			}
+		case *ast.ColumnConstraint_NotNull:
+			if err := NotNullFromColumnConstraint(constraints, constraint); err != nil {
+				errs = append(errs, err)
+			}
+		case *ast.ColumnConstraint_Unique:
+			if err := UniqueFromColumnConstraintAst(column, constraints, constraint); err != nil {
+				errs = append(errs, err)
+			}
+		case *ast.ColumnConstraint_ForeignKey:
+			if err := ForeignKeyFromColumnConstraintAst(column, constraints, constraint); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
 type Column struct {
 	ColumnDefinition *ast.ColumnDefinition
 
 	Name string
 	Type *Type
-	PK   any
+	PK   *PrimaryKey
 	ColumnConstraints
 }
 
-func ColumnFromAst(colDef *ast.ColumnDefinition) Columnish {
-	return &Column{
-		ColumnDefinition:  colDef,
-		Name:              colDef.ColumnName.Text,
-		Type:              TypeFromAst(colDef.TypeName),
-		ColumnConstraints: *ColumnConstraintsFromAst(colDef.ColumnConstraints),
+func (col *Column) column() {}
+
+func (c *Column) GetName() *ast.Identifier {
+	return &c.ColumnDefinition.ColumnName
+}
+
+func (c *Column) GetConstraints() ColumnConstraints {
+	return c.ColumnConstraints
+}
+
+func (c *Column) Eq(otherAny any) bool {
+	other, ok := otherAny.(*Column)
+	if !ok {
+		return false
 	}
+
+	return c.ColumnDefinition.Eq(other.ColumnDefinition)
+}
+
+func ColumnFromAst(table *Table, column *Column, colDef *ast.ColumnDefinition) (err error) {
+
+	column.ColumnDefinition = colDef
+	column.Name = colDef.ColumnName.String()
+	column.Type, err = TypeFromAst(colDef.TypeName)
+
+	err = ColumnConstraintsFromAst(table, column, &column.ColumnConstraints, colDef.ColumnConstraints)
+
+	return err
 }

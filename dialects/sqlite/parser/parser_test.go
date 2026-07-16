@@ -70,7 +70,7 @@ func TestParseIdentifier(t *testing.T) {
 	parser := makeParser("user_id [user_id] `user_id` \"user_id\"")
 
 	for !parser.EndOfFile() {
-		ident := parser.Identifier()
+		ident := parser.Identifier(false)
 		if ident.Text != "user_id" {
 			t.FailNow()
 		}

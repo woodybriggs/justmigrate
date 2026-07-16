@@ -455,10 +455,11 @@ func (t *Lexer) NextToken() (tok token.Token) {
 				}
 				prev = t.eat()
 			}
-			// eat the last '
-			t.eat()
+
 			end := t.Cur
 			tok.Text = string(t.Raw[start:end])
+			// eat the last '
+			t.eat()
 			tok.OpenQuote = '\''
 			tok.CloseQuote = '\''
 			return tok

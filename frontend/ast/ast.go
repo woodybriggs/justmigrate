@@ -23,7 +23,19 @@ func MakeParseError(err error, consumedTokens ...token.Token) *ParseError {
 type Identifier token.Token
 
 func (node *Identifier) String() string {
-	return fmt.Sprintf("%c%s%c", node.OpenQuote, node.Text, node.CloseQuote)
+	sb := strings.Builder{}
+
+	if node.OpenQuote != '\x00' {
+		sb.WriteRune(node.OpenQuote)
+	}
+
+	sb.WriteString(node.Text)
+
+	if node.CloseQuote != '\x00' {
+		sb.WriteRune(node.CloseQuote)
+	}
+
+	return sb.String()
 }
 
 func MakeIdentifier(token token.Token) *Identifier {
@@ -273,10 +285,10 @@ func (node *CatalogObjectIdentifier) String() string {
 	sb := &strings.Builder{}
 
 	if node.SchemaName != nil {
-		fmt.Fprint(sb, node.SchemaName)
+		fmt.Fprint(sb, node.SchemaName.String())
 		fmt.Fprint(sb, ".")
 	}
-	fmt.Fprint(sb, node.ObjectName)
+	fmt.Fprint(sb, node.ObjectName.String())
 	return sb.String()
 }
 
@@ -392,6 +404,30 @@ func MakeConflictClause(
 		OnKeyword:       onKeyword,
 		ConflictKeyword: conflictKeyword,
 		Action:          actionKeyword,
+	}
+}
+
+type TableConstraint_Unique struct {
+	Name           *ConstraintName
+	LParen         token.Token
+	IndexedColumns []IndexedColumn
+	RParen         token.Token
+	ConflictClause *ConflictClause
+}
+
+func MakeTableConstraintUnique(
+	constraintName *ConstraintName,
+	lParen token.Token,
+	indexedCols []IndexedColumn,
+	rParen token.Token,
+	conflictClause *ConflictClause,
+) *TableConstraint_Unique {
+	return &TableConstraint_Unique{
+		Name:           constraintName,
+		LParen:         lParen,
+		IndexedColumns: indexedCols,
+		RParen:         rParen,
+		ConflictClause: conflictClause,
 	}
 }
 
@@ -688,35 +724,35 @@ func MakeColumnConstraintForeignKey(
 }
 
 type ColumnConstraint_Unique struct {
-	Name          *ConstraintName
-	UniqueKeyword Keyword
+	Name           *ConstraintName
+	UniqueKeyword  Keyword
+	ConflictClause *ConflictClause
 }
 
 func MakeColumnConstraintUnique(
 	constraintName *ConstraintName,
 	uniqueKeyword Keyword,
+	conflictClause *ConflictClause,
 ) *ColumnConstraint_Unique {
 	return &ColumnConstraint_Unique{
-		Name:          constraintName,
-		UniqueKeyword: uniqueKeyword,
+		Name:           constraintName,
+		UniqueKeyword:  uniqueKeyword,
+		ConflictClause: conflictClause,
 	}
 }
 
 type ColumnConstraint_Collate struct {
-	Name           *ConstraintName
-	CollateKeyword Keyword
-	CollationName  Identifier
+	Name    *ConstraintName
+	Collate *Collation
 }
 
 func MakeColumnConstraintCollate(
 	constraintName *ConstraintName,
-	collateKeyword Keyword,
-	collationName Identifier,
+	collate *Collation,
 ) *ColumnConstraint_Collate {
 	return &ColumnConstraint_Collate{
-		Name:           constraintName,
-		CollateKeyword: collateKeyword,
-		CollationName:  collationName,
+		Name:    constraintName,
+		Collate: collate,
 	}
 }
 
@@ -789,18 +825,18 @@ func MakeColumnConstraintGenerated(
 type ColumnConstraint_Check struct {
 	Name         *ConstraintName
 	CheckKeyword Keyword
-	CheckExpr    Expr
+	Expr         Expr
 }
 
 func MakeColumnConstraintCheck(
 	constraintName *ConstraintName,
 	checkKeyword Keyword,
-	checkExpr Expr,
+	expr Expr,
 ) *ColumnConstraint_Check {
 	return &ColumnConstraint_Check{
 		Name:         constraintName,
 		CheckKeyword: checkKeyword,
-		CheckExpr:    checkExpr,
+		Expr:         expr,
 	}
 }
 

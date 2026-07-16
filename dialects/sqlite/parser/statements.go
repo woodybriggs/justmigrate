@@ -12,8 +12,9 @@ import (
 func (p *SqliteParser) Statements() []ast.Statement {
 	statements := []ast.Statement{}
 
-	for !p.EndOfFile() {
-		func() {
+	loopCount := 0
+	for !p.EndOfFile() && loopCount < 1024 {
+		func(loopCount int) {
 			defer func() {
 				if r := recover(); r != nil {
 					if err, isErr := r.(error); isErr && errors.Is(err, ErrNotImplemented) {
@@ -29,7 +30,8 @@ func (p *SqliteParser) Statements() []ast.Statement {
 
 			// if this fails/panics, the defer block above handles it too.
 			p.Expect(';')
-		}()
+		}(loopCount)
+		loopCount++
 	}
 
 	return statements
@@ -43,7 +45,7 @@ func (p *SqliteParser) Statement() ast.Statement {
 	case token.TokenKind_Keyword_CREATE:
 		return p.CreateStatement()
 	default:
-		fmt.Fprintf(os.Stderr, "unhandled statement")
+		fmt.Fprintf(os.Stderr, "unhandled statement %v", p.Current().Text)
 		os.Exit(1)
 		panic(ErrNotImplemented)
 	}

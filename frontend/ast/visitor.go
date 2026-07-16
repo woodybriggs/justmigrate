@@ -19,6 +19,7 @@ type Visitor interface {
 	VisitTableAlterationDropColumn(*DropColumn)
 
 	VisitTableConstraintCheck(*TableConstraint_Check)
+	VisitTableConstraintUnique(*TableConstraint_Unique)
 	VisitTableConstraintPrimaryKey(*TableConstraint_PrimaryKey)
 	VisitTableConstraintForeignKey(*TableConstraint_ForeignKey)
 
@@ -101,6 +102,10 @@ func (node *TableConstraint_Check) Accept(v Visitor) {
 
 func (node *TableConstraint_PrimaryKey) Accept(v Visitor) {
 	v.VisitTableConstraintPrimaryKey(node)
+}
+
+func (node *TableConstraint_Unique) Accept(v Visitor) {
+	v.VisitTableConstraintUnique(node)
 }
 
 func (node *TableConstraint_ForeignKey) Accept(v Visitor) {

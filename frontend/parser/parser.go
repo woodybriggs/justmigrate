@@ -186,7 +186,7 @@ func (p *Parser) CatalogObjectIdentifier() *ast.CatalogObjectIdentifier {
 	p.PushParseContext("catalog object identifier")
 	defer p.PopParseContext()
 
-	schemaOrTable := p.Identifier()
+	schemaOrTable := p.Identifier(false)
 
 	if p.Current().Kind != token.TokenKind_Period {
 		tableName := schemaOrTable
@@ -195,7 +195,7 @@ func (p *Parser) CatalogObjectIdentifier() *ast.CatalogObjectIdentifier {
 	p.Advance()
 
 	schemaName := schemaOrTable
-	tableName := p.Identifier()
+	tableName := p.Identifier(false)
 
 	return ast.MakeCatalogObjectIdentifier(
 		&schemaName,
@@ -203,9 +203,19 @@ func (p *Parser) CatalogObjectIdentifier() *ast.CatalogObjectIdentifier {
 	)
 }
 
-func (p *Parser) Identifier() ast.Identifier {
+func (p *Parser) Identifier(allowKeyword bool) ast.Identifier {
 	p.PushParseContext("identifier")
 	defer p.PopParseContext()
+
+	if allowKeyword {
+		kind := p.Current().Kind
+		if kind == token.TokenKind_Identifier || kind > token.TokenKindOffset_Keywords {
+			tok := p.Expect(kind)
+			tok.Kind = token.TokenKind_Identifier
+			return ast.Identifier(tok)
+		}
+	}
+
 	return ast.Identifier(p.Expect(token.TokenKind_Identifier))
 }
 
@@ -215,7 +225,7 @@ func (p *Parser) MaybeCollation() *ast.Collation {
 		return nil
 	}
 	collateKeyword := ast.Keyword(p.Current())
-	name := p.Identifier()
+	name := p.Identifier(true)
 
 	return ast.MakeCollation(
 		collateKeyword,
@@ -226,6 +236,7 @@ func (p *Parser) MaybeCollation() *ast.Collation {
 type PrattParser interface {
 	Term() ast.Expr
 	OperatorBindingPower(token token.Token) (bp ast.BindingPower, found bool)
+	OpParser(op token.Token) (func(bindingPower int) ast.Expr, bool)
 }
 
 func (p *Parser) Expr(
@@ -234,7 +245,8 @@ func (p *Parser) Expr(
 ) ast.Expr {
 	lhs := prattParser.Term()
 
-	for !p.EndOfFile() {
+	loopCount := 0
+	for !p.EndOfFile() && loopCount < 1024 {
 		bp, found := prattParser.OperatorBindingPower(p.Current())
 		if !found {
 			return lhs
@@ -246,7 +258,13 @@ func (p *Parser) Expr(
 		op := p.Current()
 		p.Advance()
 
-		rhs := p.Expr(bp.R, prattParser)
+		var rhs ast.Expr = nil
+		opParser, exists := prattParser.OpParser(op)
+		if exists {
+			rhs = opParser(bp.R)
+		} else {
+			rhs = p.Expr(bp.R, prattParser)
+		}
 
 		binaryOp := ast.MakeBinaryOpExpr(
 			lhs,
@@ -255,6 +273,7 @@ func (p *Parser) Expr(
 		)
 
 		lhs = binaryOp
+		loopCount++
 	}
 
 	return lhs

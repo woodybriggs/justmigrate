@@ -4,56 +4,59 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"slices"
 	"woodybriggs/justmigrate/backend/diff"
 	"woodybriggs/justmigrate/backend/formatter"
+	"woodybriggs/justmigrate/backend/schema"
 	"woodybriggs/justmigrate/frontend/ast"
 )
 
-// Plan takes a first pass of "dumb" operations (create table, drop table, etc.)
-// and transforms them into a detailed, ordered, and valid execution plan for SQLite.
-//
-// This process is particularly complex for SQLite due to its limited `ALTER TABLE`
-// support, which often necessitates a full table recreation for many common modifications.
-//
-// The planner's responsibilities include:
-//
-//  1. Schema Graph Construction: Before planning, the planner must have access to a
-//     graph representation of the database schema, including tables, columns,
-//     foreign keys, indexes, and triggers. This graph is essential for
-//     dependency analysis.
-//
-//  2. Operation Validation: Determine if each requested operation is natively
-//     supported by the SQLite dialect. For example, `ADD COLUMN` is supported,
-//     but `DROP COLUMN` is only supported in recent SQLite versions and may need
-//     to be lowered.
-//
-//  3. Operation Lowering: Convert high-level, unsupported operations into a
-//     sequence of simpler, supported SQLite operations. The primary example is
-//     the "12-step" table recreation strategy for changes like dropping a column,
-//     altering a column's type, or adding a foreign key to an existing table.
-//     This involves:
-//     - Creating a new table with the desired schema.
-//     - Generating an `INSERT INTO ... SELECT ...` statement to migrate data
-//     from the old table to the new one, correctly mapping columns.
-//     - Dropping the original table.
-//     - Renaming the new table to the original's name.
-//     - Re-creating any indexes and triggers that existed on the original table.
-//
-//  4. Dependency Analysis: Identify and resolve dependencies between operations
-//     using the schema graph. For instance, a table cannot be dropped if it is
-//     referenced by a foreign key in another table. The planner must ensure
-//     the foreign key constraint is dropped first or that the referencing table
-//     is also part of a recreation plan.
-//
-//  5. Execution Ordering & Pragmas: Arrange the final sequence of operations
-//     into an executable order that satisfies all dependencies. This also involves
-//     injecting necessary session pragmas like `PRAGMA foreign_keys = OFF;` at the
-//     start and `PRAGMA foreign_keys = ON;` at the end of the migration.
-//
-//  6. Transaction Grouping: Group related sequences of operations (like the
-//     entire table recreation process) into logical units that should be
-//     executed within a single transaction to ensure atomicity.
+/*
+Plan takes a first pass of "dumb" operations (create table, drop table, etc.)
+
+	and transforms them into a detailed, ordered, and valid execution plan for SQLite.
+
+	This process is particularly complex for SQLite due to its limited `ALTER TABLE`
+	support, which often necessitates a full table recreation for many common modifications.
+
+	The planner's responsibilities include:
+
+	 1. Schema Graph Construction: Before planning, the planner must have access to a
+	    graph representation of the database schema, including tables, columns,
+	    foreign keys, indexes, and triggers. This graph is essential for
+	    dependency analysis.
+
+	 2. Operation Validation: Determine if each requested operation is natively
+	    supported by the SQLite dialect. For example, `ADD COLUMN` is supported,
+	    but `DROP COLUMN` is only supported in recent SQLite versions and may need
+	    to be lowered.
+
+	 3. Operation Lowering: Convert high-level, unsupported operations into a
+	    sequence of simpler, supported SQLite operations. The primary example is
+	    the "12-step" table recreation strategy for changes like dropping a column,
+	    altering a column's type, or adding a foreign key to an existing table.
+	    This involves:
+	    - Creating a new table with the desired schema.
+	    - Generating an `INSERT INTO ... SELECT ...` statement to migrate data
+	    from the old table to the new one, correctly mapping columns.
+	    - Dropping the original table.
+	    - Renaming the new table to the original's name.
+	    - Re-creating any indexes and triggers that existed on the original table.
+
+	 4. Dependency Analysis: Identify and resolve dependencies between operations
+	    using the schema graph. For instance, a table cannot be dropped if it is
+	    referenced by a foreign key in another table. The planner must ensure
+	    the foreign key constraint is dropped first or that the referencing table
+	    is also part of a recreation plan.
+
+	 5. Execution Ordering & Pragmas: Arrange the final sequence of operations
+	    into an executable order that satisfies all dependencies. This also involves
+	    injecting necessary session pragmas like `PRAGMA foreign_keys = OFF;` at the
+	    start and `PRAGMA foreign_keys = ON;` at the end of the migration.
+
+	 6. Transaction Grouping: Group related sequences of operations (like the
+	    entire table recreation process) into logical units that should be
+	    executed within a single transaction to ensure atomicity.
+*/
 func (gen *SqliteFormatter) Plan(src, tgt []ast.Statement, ops []diff.Op) ([]diff.Op, error) {
 	var errs []error
 	srcGraph, err := NewSchemaGraphFromStatements(src)
@@ -85,7 +88,7 @@ func (gen *SqliteFormatter) Plan(src, tgt []ast.Statement, ops []diff.Op) ([]dif
 	var plan []diff.Op
 	for _, op := range ops {
 		switch o := op.(type) {
-		case *diff.DelColOp:
+		case *diff.DropColOp:
 			// can we be certain about this lookup?, given that the ops were generated from the schemas
 
 			// if deleting the column will break a foreign key somewhere
@@ -94,15 +97,14 @@ func (gen *SqliteFormatter) Plan(src, tgt []ast.Statement, ops []diff.Op) ([]dif
 			// and we will have to do at least 2 passes over the plan
 			// to ensure that the plan is suitable for the dialect in this case 'sqlite'
 
-			ogTable := srcGraph.Tables[o.Table.ObjectName.Text]
-			childTables := srcGraph.Columns[ogTable.Name][o.Col.Text].DependantTables
+			ogTable := srcGraph.Tables[o.Table.Name]
+			childTables := srcGraph.Columns[ogTable.Name][o.Col.GetName()].DependantTables
 			for _, child := range childTables {
 				// for each dependant child
 				_ = child
 			}
 
-			newTable := ast.Copy(ogTable.CreateTable).(*ast.CreateTable)
-			dropColumn(newTable, o.Col)
+			dropColumn(ogTable, o.Col)
 
 			fmtter := NewSqliteFormatter(false, formatter.NewCoreFormatter(os.Stdout, 80, "\"\""))
 			fmtter.VisitStatements([]ast.Statement{newTable})
@@ -140,17 +142,7 @@ func (gen *SqliteFormatter) Plan(src, tgt []ast.Statement, ops []diff.Op) ([]dif
 	return plan, nil
 }
 
-func dropColumn(table *ast.CreateTable, colName *ast.Identifier) {
-	indexOfCol := slices.IndexFunc(table.TableDefinition.ColumnDefinitions, func(col ast.ColumnDefinition) bool {
-		return col.ColumnName.Eq(colName)
-	})
-
-	if indexOfCol == -1 {
-		return
-	}
-
-	table.TableDefinition.ColumnDefinitions = append(
-		table.TableDefinition.ColumnDefinitions[:indexOfCol],
-		table.TableDefinition.ColumnDefinitions[indexOfCol+1:]...,
-	)
+func dropColumn(table *schema.Table, colName schema.ColumnLike) {
+	// 1. check if any tables depend on this column (fk)
+	// 2. check if any
 }

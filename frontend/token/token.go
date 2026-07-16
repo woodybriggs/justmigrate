@@ -63,6 +63,7 @@ const (
 	TokenKind_Backtic   TokenKind = '`'
 	TokenKind_gt        TokenKind = '>'
 	TokenKind_lt        TokenKind = '<'
+	TokenKind_eq        TokenKind = '='
 	TokenKind_not       TokenKind = '!'
 )
 
@@ -163,6 +164,10 @@ const (
 
 	TokenKind_Keyword_ADD
 	TokenKind_Keyword_DROP
+
+	TokenKind_Keyword_OR
+	TokenKind_Keyword_BETWEEN
+	TokenKind_Keyword_AND
 )
 
 const (
@@ -237,6 +242,9 @@ const (
 	Keyword_USING         string = "using"
 	Keyword_WHERE         string = "where"
 	Keyword_SELECT        string = "select"
+	Keyword_OR            string = "or"
+	Keyword_BETWEEN       string = "between"
+	Keyword_AND           string = "and"
 )
 
 type MapIndex[TKey comparable, TVal comparable] struct {
@@ -335,7 +343,10 @@ var KeywordIndex = NewIndex[string, TokenKind]().
 	Add(Keyword_ELSE, TokenKind_Keyword_ELSE).
 	Add(Keyword_END, TokenKind_Keyword_END).
 	Add(Keyword_USING, TokenKind_Keyword_USING).
-	Add(Keyword_WHERE, TokenKind_Keyword_WHERE)
+	Add(Keyword_WHERE, TokenKind_Keyword_WHERE).
+	Add(Keyword_OR, TokenKind_Keyword_OR).
+	Add(Keyword_BETWEEN, TokenKind_Keyword_BETWEEN).
+	Add(Keyword_AND, TokenKind_Keyword_AND)
 
 var ConstaintKeywords = map[TokenKind]bool{
 	TokenKind_Keyword_CONSTRAINT: true,
@@ -352,6 +363,15 @@ var ConstaintKeywords = map[TokenKind]bool{
 type TextRange struct {
 	Start int
 	End   int
+}
+
+func (tr *TextRange) ExtendBy(nr TextRange) {
+	if nr.Start < tr.Start {
+		tr.Start = nr.Start
+	}
+	if nr.End > tr.End {
+		tr.End = nr.End
+	}
 }
 
 type Location struct {

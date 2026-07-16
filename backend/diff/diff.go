@@ -3,8 +3,13 @@ package diff
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"runtime"
 	"slices"
+	"woodybriggs/justmigrate/backend/op"
+	"woodybriggs/justmigrate/backend/schema"
 	"woodybriggs/justmigrate/frontend/ast"
+	"woodybriggs/justmigrate/frontend/report"
 	"woodybriggs/justmigrate/prompt"
 )
 
@@ -14,20 +19,12 @@ var (
 	ErrArgumentMismatch error = errors.New("arguments a and b do not match")
 )
 
-func filterForCreateTable(value ast.Statement) (*ast.CreateTable, bool) {
-	result, ok := value.(*ast.CreateTable)
-	return result, ok
-}
-
-func isSameCreateTable(a, b *ast.CreateTable) bool {
-	return a.TableIdentifier.Eq(b.TableIdentifier)
-}
-
 func resolveMissingColumns(
-	table *ast.CatalogObjectIdentifier,
-	removed []ast.ColumnDefinition,
-	added []ast.ColumnDefinition,
-) (finalRemoved []ast.ColumnDefinition, finalAdded []ast.ColumnDefinition, ops []Op) {
+	schem *schema.Schema,
+	table *schema.Table,
+	removed []schema.ColumnLike,
+	added []schema.ColumnLike,
+) (finalRemoved []schema.ColumnLike, finalAdded []schema.ColumnLike, ops []op.Op) {
 	if len(removed) == 0 {
 		return removed, added, nil
 	}
@@ -41,7 +38,6 @@ func resolveMissingColumns(
 	defer terminal.Restore()
 
 	for _, newCol := range added {
-
 		// if we have resolved all the "removed" columns,
 		// then it can be assumed that any column that
 		// hasn't been marked as renamed is definatly a new column
@@ -50,39 +46,52 @@ func resolveMissingColumns(
 			continue
 		}
 
+		// prepare the options
 		options := []prompt.SelectOption{
 			{
-				Label: fmt.Sprintf("new column: %s", newCol.ColumnName.Text),
-				Value: &NewColOp{Table: table, Col: &newCol},
+				Label: fmt.Sprintf("new column: %s", newCol.GetName()),
+				Value: &op.AddColumn{
+					Target: op.TargetTable{
+						Schema: schem,
+						Table:  table,
+					},
+					ColumnDefinition: newCol,
+				},
 			},
 		}
-
 		for _, unresolvedCol := range unresolvedRemovedCols {
 			options = append(options, prompt.SelectOption{
-				Label: fmt.Sprintf("renamed from: %s", unresolvedCol.ColumnName.Text),
-				Value: &RenameColOp{Table: table, FromCol: &unresolvedCol.ColumnName, ToCol: &newCol.ColumnName},
+				Label: fmt.Sprintf("renamed from: %s", unresolvedCol.GetName()),
+				Value: &op.RenameColumn{
+					Target: op.TargetColumn{
+						Schema: schem,
+						Table:  table,
+						Column: unresolvedCol,
+					},
+					NewName: newCol.GetName(),
+				},
 			})
 		}
 
 		sel := prompt.Select{}
-		title := fmt.Sprintf("Resolve column %s.%s: Is this column new or renamed?", table.ObjectName.Text, newCol.ColumnName.Text)
+		title := fmt.Sprintf("Resolve column %s.%s: Is this column new or renamed?", table.Name, newCol.GetName())
 		choiceIndex, err := sel.Do(&terminal, title, options)
 		if err != nil {
 			panic(err)
 		}
-		op := options[choiceIndex]
-		switch typ := op.Value.(type) {
-		case *RenameColOp:
+		operation := options[choiceIndex]
+		switch operation := operation.Value.(type) {
+		case *op.RenameColumn:
 			// remove the From column from the unresolved columns as it is now resolved
-			unresolvedRemovedCols = slices.DeleteFunc(unresolvedRemovedCols, func(col ast.ColumnDefinition) bool {
-				return col.ColumnName.Eq(typ.FromCol)
+			unresolvedRemovedCols = slices.DeleteFunc(unresolvedRemovedCols, func(col schema.ColumnLike) bool {
+				return col.GetName().Eq(operation.NewName)
 			})
 
 			// add the rename op to the output
-			ops = append(ops, typ)
-		case *NewColOp:
+			ops = append(ops, operation)
+		case *op.AddColumn:
 			// add the new column to final added
-			finalAdded = append(finalAdded, *typ.Col)
+			finalAdded = append(finalAdded, operation.ColumnDefinition)
 		}
 	}
 	// any unresolved removed columns are now final as removed
@@ -91,9 +100,10 @@ func resolveMissingColumns(
 }
 
 func resolveMissingTables(
-	removed []*ast.CreateTable,
-	added []*ast.CreateTable,
-) (finalRemoved []*ast.CreateTable, finalAdded []*ast.CreateTable, ops []Op) {
+	schem *schema.Schema,
+	removed []*schema.Table,
+	added []*schema.Table,
+) (finalRemoved []*schema.Table, finalAdded []*schema.Table, ops []op.Op) {
 
 	if len(removed) == 0 {
 		return removed, added, nil
@@ -109,46 +119,57 @@ func resolveMissingTables(
 	for _, newTable := range added {
 
 		// if we have resolved all the "removed" columns,
-		// then it can be assumed that any column that
-		// hasn't been marked as renamed is definatly a new column
+		// then it can be assumed that any table that
+		// hasn't been marked as renamed is defineatly a new table
 		if len(unresolvedRemovedTables) == 0 {
 			finalAdded = append(finalAdded, newTable)
 			continue
 		}
 
+		// prepare the options
 		options := []prompt.SelectOption{
 			{
-				Label: fmt.Sprintf("new table: %s", newTable.TableIdentifier.ObjectName.Text),
-				Value: &NewTableOp{newTable},
+				Label: fmt.Sprintf("new table: %s", newTable.Name),
+				Value: &op.AddTable{
+					Target: op.TargetSchema{
+						Schema: schem,
+					},
+					Table: newTable,
+				},
 			},
 		}
 
 		for _, unresolved := range unresolvedRemovedTables {
 			options = append(options, prompt.SelectOption{
-				Label: fmt.Sprintf("renamed from:  %s", unresolved.TableIdentifier.ObjectName.Text),
-				Value: &RenameTableOp{From: unresolved.TableIdentifier, To: newTable.TableIdentifier},
+				Label: fmt.Sprintf("renamed from:  %s", unresolved.Name),
+				Value: &op.RenameTable{
+					Target: op.TargetTable{
+						Schema: schem,
+						Table:  unresolved,
+					},
+					NewName: newTable.CreateTable.TableIdentifier,
+				},
 			})
 		}
 
 		sel := prompt.Select{}
-		title := fmt.Sprintf("Resolve table %s: Is this table new or renamed?", newTable.TableIdentifier.ObjectName.Text)
+		title := fmt.Sprintf("Resolve table %s: Is this table new or renamed?", newTable.Name)
 		choiceIndex, err := sel.Do(&terminal, title, options)
 		if err != nil {
 			panic(err)
 		}
-		op := options[choiceIndex]
-		switch typ := op.Value.(type) {
-		case *RenameTableOp:
+		operation := options[choiceIndex]
+		switch operation := operation.Value.(type) {
+		case *op.RenameTable:
 			// remove the From table from the unresolved table as it is now resolved
-			unresolvedRemovedTables = slices.DeleteFunc(unresolvedRemovedTables, func(table *ast.CreateTable) bool {
-				return table.TableIdentifier.Eq(typ.From)
+			unresolvedRemovedTables = slices.DeleteFunc(unresolvedRemovedTables, func(table *schema.Table) bool {
+				return table.CreateTable.TableIdentifier.Eq(operation.NewName)
 			})
-
 			// add the rename op to the output
-			ops = append(ops, typ)
-		case *NewTableOp:
+			ops = append(ops, operation)
+		case *op.AddTable:
 			// add the new table to final added
-			finalAdded = append(finalAdded, typ.CreateTable)
+			finalAdded = append(finalAdded, operation.Table)
 		}
 	}
 
@@ -157,31 +178,52 @@ func resolveMissingTables(
 	return
 }
 
-func (diff *Diff) DiffSchema(src, tgt []ast.Statement) ([]Op, error) {
-	ops := []Op{}
+func diffState[T any](a, b *T, ifA, ifB func(*T)) {
+	if a != nil && b == nil {
+		ifA(a)
+	} else if a == nil && b != nil {
+		ifB(b)
+	}
+}
+
+func (diff *Diff) DiffSchema(src, tgt *schema.Schema) (ops []op.Op, err error) {
 
 	// Compare all create table statements
 	{
-		src := slices.Collect(filterThenMap(slices.Values(src), filterForCreateTable))
-		tgt := slices.Collect(filterThenMap(slices.Values(tgt), filterForCreateTable))
+		isSameTable := func(a *schema.Table, b *schema.Table) bool {
+			return a.CreateTable.TableIdentifier.Eq(b.CreateTable.TableIdentifier)
+		}
 
-		maybeRemovedTables, maybeAddedTables := symmetricDifference(src, tgt, isSameCreateTable)
-		maybeModifiedTables := intersection(src, tgt, isSameCreateTable)
+		a := slices.Collect(maps.Values(src.Tables))
+		b := slices.Collect(maps.Values(tgt.Tables))
 
-		removedTables, addedTables, renamedTableOps := resolveMissingTables(maybeRemovedTables, maybeAddedTables)
+		maybeRemoved, maybeAdded := symmetricDifferenceFunc(a, b, isSameTable)
+		maybeModified := intersectionFunc(a, b, isSameTable)
+
+		removedTables, addedTables, renamedTableOps := resolveMissingTables(src, maybeRemoved, maybeAdded)
 
 		for _, removedTable := range removedTables {
-			ops = append(ops, &DelTableOp{removedTable.TableIdentifier})
+			ops = append(ops, &op.DropTable{
+				Target: op.TargetTable{
+					Schema: src,
+					Table:  removedTable,
+				},
+			})
 		}
 
 		for _, addedTable := range addedTables {
-			ops = append(ops, &NewTableOp{addedTable})
+			ops = append(ops, &op.AddTable{
+				Target: op.TargetSchema{
+					Schema: src,
+				},
+				Table: addedTable,
+			})
 		}
 
 		ops = append(ops, renamedTableOps...)
 
-		for _, pair := range maybeModifiedTables {
-			tableOps := diff.DiffCreateTable(pair.A, pair.B)
+		for _, pair := range maybeModified {
+			tableOps := diff.DiffCreateTable(src, pair.A, pair.B)
 			if tableOps != nil {
 				ops = append(ops, tableOps...)
 			}
@@ -191,104 +233,418 @@ func (diff *Diff) DiffSchema(src, tgt []ast.Statement) ([]Op, error) {
 	return ops, nil
 }
 
-func isSameColumnDefinition(a, b ast.ColumnDefinition) bool {
-	return a.ColumnName.Eq(&b.ColumnName)
-}
+func (diff *Diff) DiffCreateTable(schem *schema.Schema, src, tgt *schema.Table) []op.Op {
+	ops := []op.Op{}
 
-func isSameTableConstraint(a, b ast.TableConstraint) bool {
-	switch a := a.(type) {
-	case *ast.TableConstraint_PrimaryKey:
-		_, ok := b.(*ast.TableConstraint_PrimaryKey)
-		if !ok {
-			return false
-		}
-		return true
-	case *ast.TableConstraint_ForeignKey:
-		b, ok := b.(*ast.TableConstraint_ForeignKey)
-		if !ok {
-			return false
-		}
-		return a.Eq(b)
-	default:
-		return false
-	}
-}
-
-func (diff *Diff) DiffCreateTable(src, tgt *ast.CreateTable) []Op {
-	ops := []Op{}
-
-	// Compare column definitions
 	{
-		a := src.TableDefinition.ColumnDefinitions
-		b := tgt.TableDefinition.ColumnDefinitions
+		isSameColumn := func(a, b schema.ColumnLike) bool {
+			return a.GetName().Eq(b.GetName())
+		}
 
-		maybeRemovedColumns, maybeAddedColumns := symmetricDifference(a, b, isSameColumnDefinition)
-		maybeModifiedColumns := intersection(a, b, isSameColumnDefinition)
+		// Compare column definitions
+		a := slices.Collect(maps.Values(src.Columns))
+		b := slices.Collect(maps.Values(tgt.Columns))
 
-		removedColumns, addedColumns, renamedColumnsOps := resolveMissingColumns(src.TableIdentifier, maybeRemovedColumns, maybeAddedColumns)
+		maybeRemovedColumns, maybeAddedColumns := symmetricDifferenceFunc(a, b, isSameColumn)
+		maybeModifiedColumns := intersectionFunc(a, b, isSameColumn)
+
+		removedColumns, addedColumns, renamedColumnsOps := resolveMissingColumns(schem, src, maybeRemovedColumns, maybeAddedColumns)
 
 		for _, removedColumn := range removedColumns {
-			ops = append(ops, &DelColOp{Table: src.TableIdentifier, Col: &removedColumn.ColumnName})
+			ops = append(ops, &op.DropColumn{
+				Target: op.TargetColumn{
+					Schema: schem,
+					Table:  src,
+					Column: removedColumn,
+				},
+			})
 		}
 
 		for _, addedColumn := range addedColumns {
-			ops = append(ops, &NewColOp{Table: src.TableIdentifier, Col: &addedColumn})
+			ops = append(ops, &op.AddColumn{
+				Target: op.TargetTable{
+					Schema: schem,
+					Table:  src,
+				},
+				ColumnDefinition: addedColumn,
+			})
 		}
 
 		ops = append(ops, renamedColumnsOps...)
 
 		for _, pair := range maybeModifiedColumns {
-			columnOps := diff.DiffColumnDefinition(src.TableIdentifier, pair.A, pair.B)
+			columnOps := diff.DiffColumnDefinition(schem, src, pair.A, pair.B)
 			if columnOps != nil {
 				ops = append(ops, columnOps...)
 			}
 		}
 	}
 
-	/*
-			We need to extract out the table constraints by type.
+	// check for changes in primary keys
+	if false {
+	} else if src.Constraints.PK == nil && tgt.Constraints.PK != nil {
+		// primary key added
+		switch pk := tgt.Constraints.PK.Node.(type) {
+		case *ast.ColumnConstraint_PrimaryKey:
+			if len(tgt.Constraints.PK.ResolvedColumns) != 1 {
+				err := report.NewReport("malformed primary key column constraint").
+					WithMessage("a primary key column constraint, can only have one resolved column").
+					WithLabels(
+						report.LabelFromKeyword(pk.PrimaryKeyword, "this primary key"),
+					)
+				// @TODO(woody): don't know how to handle this error
+				// we are in an invariant of this codebase not a user error
+				panic(err)
+			}
 
-			1. We know that there is only ever one PK constraint per table
-			2. We can collect and compare all FK constraints
-		       we might be able to skip FK constraints as they would likely be handled in the planner
-			   where we explicity check all FK constraints for referentaial integrety.
-			3. We can collect and compare all UNIQUE constraints
-			4. We can collect and compare all CHECK constraints
-	*/
+			targetColumnName := tgt.Constraints.PK.ResolvedColumns[0].GetName().String()
+			targetColumn := src.Columns[targetColumnName]
 
-	return ops
-}
+			ops = append(ops, &op.AddColumnConstraint{
+				Target: op.TargetColumn{
+					Schema: schem,
+					Table:  src,
+					Column: targetColumn,
+				},
+				Constraint: pk,
+			})
+		case *ast.TableConstraint_PrimaryKey:
+			ops = append(ops, &op.AddTableConstraint{
+				Target: op.TargetTable{
+					Schema: schem,
+					Table:  src,
+				},
+				Constraint: pk,
+			})
+		}
+	} else if src.Constraints.PK != nil && tgt.Constraints.PK == nil {
+		// primary key removed
+		switch pk := src.Constraints.PK.Node.(type) {
+		case *ast.ColumnConstraint_PrimaryKey:
+			if len(src.Constraints.PK.ResolvedColumns) != 1 {
+				err := report.NewReport("malformed primary key column constraint").
+					WithMessage("a primary key column constraint, can only have one resolved column").
+					WithLabels(
+						report.LabelFromKeyword(pk.PrimaryKeyword, "this primary key"),
+					)
+				// @TODO(woody): don't know how to handle this error
+				// we are in an invariant of this codebase not a user error
+				panic(err)
+			}
 
-func (diff *Diff) DiffColumnDefinition(table *ast.CatalogObjectIdentifier, src, tgt ast.ColumnDefinition) []Op {
-	ops := []Op{}
+			targetColumn := src.Constraints.PK.ResolvedColumns[0]
 
-	if !src.TypeName.Eq(tgt.TypeName) {
-		ops = append(ops, &ChangeColTypeOp{Table: table, Col: &src.ColumnName, TypeName: tgt.TypeName})
+			ops = append(ops, &op.DropColumnConstraint{
+				Target: op.TargetColumnConstraint{
+					Schema:     schem,
+					Table:      src,
+					Column:     targetColumn,
+					Constraint: pk,
+				},
+			})
+		case *ast.TableConstraint_PrimaryKey:
+			ops = append(ops, &op.DropTableConstraint{
+				Target: op.TargetTableConstraint{
+					Schema:     schem,
+					Table:      src,
+					Constraint: pk,
+				},
+			})
+		}
+	} else if !src.Constraints.PK.Eq(tgt.Constraints.PK) {
+		// primary key changed
+		panic("not implemented")
 	}
 
-	/*
-		We need to pick out column constraints that are 1 per col
-		seperate them from CHECK constraints as 1 column can have many check constraints.
+	// @TODO(woody): need to do foreign keys
 
-		should we lift column constraints that can be defined as table constraints up to the table?
-		if we did we would be closer to our goal of semantic analysis, moving away from syntax more.
+	{
+		// check for changes in CHECK constraints
+		// this checks only for added and removed
+		// as there is no effect of modifiying a CHECK constraint
+		a := src.Constraints.Checks
+		b := tgt.Constraints.Checks
 
-		1. Primary Key constraint
-		2. Foreign Key (REFERENCES) constraint
-		3. Default constraint
-		4. Not Null constraint
-		5. Unique constraint
-		6. Collate constraint
-		7. As constraint
-	*/
+		removed, added := symmetricDifference(a, b)
+
+		for _, r := range removed {
+			ops = append(ops, &op.DropTableConstraint{
+				Target: op.TargetTableConstraint{
+					Schema:     schem,
+					Table:      src,
+					Constraint: r.Node.(ast.TableConstraint),
+				},
+			})
+		}
+
+		for _, a := range added {
+			ops = append(ops, &op.AddTableConstraint{
+				Target: op.TargetTable{
+					Schema: schem,
+					Table:  src,
+				},
+				Constraint: a.Node.(ast.TableConstraint),
+			})
+		}
+	}
+
+	{
+		a := src.Constraints.Uniques
+		b := src.Constraints.Uniques
+
+		removed, added := symmetricDifference(a, b)
+
+		for _, r := range removed {
+			ops = append(ops, &op.DropTableConstraint{
+				Target: op.TargetTableConstraint{
+					Schema:     schem,
+					Table:      src,
+					Constraint: r.Node.(ast.TableConstraint),
+				},
+			})
+		}
+
+		for _, a := range added {
+			ops = append(ops, &op.AddTableConstraint{
+				Target: op.TargetTable{
+					Schema: schem,
+					Table:  src,
+				},
+				Constraint: a.Node.(ast.TableConstraint),
+			})
+		}
+	}
 
 	return ops
 }
 
-func (diff *Diff) DiffTableConstraint(table *ast.CatalogObjectIdentifier, a, b ast.TableConstraint) []Op {
-	ops := []Op{}
+func __func__() string {
+	pc, file, line, _ := runtime.Caller(1)
+	fn := runtime.FuncForPC(pc)
+	return fmt.Sprint(fn.Name(), file, line)
+}
 
-	// do something here
+func (diff *Diff) DiffColumnDefinition(schem *schema.Schema, table *schema.Table, src, tgt schema.ColumnLike) []op.Op {
+	ops := []op.Op{}
+
+	switch src := src.(type) {
+	case *schema.Column:
+		{
+			if _, ok := tgt.(*schema.Column); ok {
+				// if they are the same type we can break out and continue diffing
+				break
+			}
+
+			// if the tgt col is a generated column
+			// we need to drop the column, and create the generated column
+			// this would be destructive and cause data loss
+			_ = src
+			return ops
+		}
+	case *schema.GeneratedColumn:
+		{
+			if _, ok := tgt.(*schema.GeneratedColumn); ok {
+				// if they are the same type we can break out and continue diffing
+				break
+			}
+
+			// if the tgt col is a regular column
+			// we need to drop the generated column, create the regular column
+			// this would be destructive and cause data loss
+			// could recommend to user to
+			// 1. create new column
+			// 2. copy over data from generated
+			// 3. delete generated column
+			_ = src
+
+			return ops
+		}
+	}
+
+	// if !src.TypeName.Eq(tgt.TypeName) {
+	// 	ops = append(ops, &ChangeColTypeOp{Table: table, Col: &src.ColumnName, TypeName: tgt.TypeName})
+	// }
+
+	{
+		a := src.GetConstraints()
+		b := tgt.GetConstraints()
+
+		diffState(
+			a.NotNull, b.NotNull,
+			func(notnull *schema.NotNull) {
+				ops = append(ops, &op.DropColumnConstraint{
+					Target: op.TargetColumnConstraint{
+						Schema:     schem,
+						Table:      table,
+						Column:     src,
+						Constraint: notnull.Node,
+					},
+				})
+			},
+			func(notnull *schema.NotNull) {
+				ops = append(ops, &op.AddColumnConstraint{
+					Target: op.TargetColumn{
+						Schema: schem,
+						Table:  table,
+						Column: src,
+					},
+					Constraint: notnull.Node,
+				})
+			},
+		)
+
+		diffState(
+			a.Default, b.Default,
+			func(d *schema.Default) {
+				ops = append(ops, &op.DropColumnConstraint{
+					Target: op.TargetColumnConstraint{
+						Schema:     schem,
+						Table:      table,
+						Column:     src,
+						Constraint: d.Node,
+					},
+				})
+			},
+			func(d *schema.Default) {
+				ops = append(ops, &op.AddColumnConstraint{
+					Target: op.TargetColumn{
+						Schema: schem,
+						Table:  table,
+						Column: src,
+					},
+					Constraint: d.Node,
+				})
+			},
+		)
+
+		diffState(
+			a.Unique, b.Unique,
+			func(unique *schema.Unique) {
+				ops = append(ops, &op.DropColumnConstraint{
+					Target: op.TargetColumnConstraint{
+						Schema:     schem,
+						Table:      table,
+						Column:     src,
+						Constraint: unique.Node.(*ast.ColumnConstraint_Unique),
+					},
+				})
+			},
+			func(unique *schema.Unique) {
+				ops = append(ops, &op.AddColumnConstraint{
+					Target: op.TargetColumn{
+						Schema: schem,
+						Table:  table,
+						Column: src,
+					},
+					Constraint: unique.Node.(*ast.ColumnConstraint_Unique),
+				})
+			},
+		)
+
+		diffState(
+			a.FK, b.FK,
+			func(fk *schema.ForeignKey) {
+				ops = append(ops, &op.DropColumnConstraint{
+					Target: op.TargetColumnConstraint{
+						Schema:     schem,
+						Table:      table,
+						Column:     src,
+						Constraint: fk.AstNode.(*ast.ColumnConstraint_ForeignKey),
+					},
+				})
+			},
+			func(fk *schema.ForeignKey) {
+				ops = append(ops, &op.AddColumnConstraint{
+					Target: op.TargetColumn{
+						Schema: schem,
+						Table:  table,
+						Column: src,
+					},
+					Constraint: fk.AstNode.(*ast.ColumnConstraint_ForeignKey),
+				})
+			},
+		)
+
+		diffState(
+			a.PK, b.PK,
+			func(pk *schema.PrimaryKey) {
+				ops = append(ops, &op.DropColumnConstraint{
+					Target: op.TargetColumnConstraint{
+						Schema:     schem,
+						Table:      table,
+						Column:     src,
+						Constraint: pk.Node.(*ast.ColumnConstraint_PrimaryKey),
+					},
+				})
+			},
+			func(pk *schema.PrimaryKey) {
+				ops = append(ops, &op.AddColumnConstraint{
+					Target: op.TargetColumn{
+						Schema: schem,
+						Table:  table,
+						Column: src,
+					},
+					Constraint: pk.Node.(*ast.ColumnConstraint_PrimaryKey),
+				})
+			},
+		)
+
+		diffState(
+			a.Check, b.Check,
+			func(check *schema.Check) {
+				ops = append(ops, &op.DropColumnConstraint{
+					Target: op.TargetColumnConstraint{
+						Schema:     schem,
+						Table:      table,
+						Column:     src,
+						Constraint: check.Node.(*ast.ColumnConstraint_Check),
+					},
+				})
+			},
+			func(check *schema.Check) {
+				ops = append(ops, &op.AddColumnConstraint{
+					Target: op.TargetColumn{
+						Schema: schem,
+						Table:  table,
+						Column: src,
+					},
+					Constraint: check.Node.(*ast.ColumnConstraint_Check),
+				})
+			},
+		)
+
+		diffState(
+			a.Collate, b.Collate,
+			func(check *schema.CollateConstraint) {
+				ops = append(ops, &op.DropColumnConstraint{
+					Target: op.TargetColumnConstraint{
+						Schema:     schem,
+						Table:      table,
+						Column:     src,
+						Constraint: check.Node.(*ast.ColumnConstraint_Collate),
+					},
+				})
+			},
+			func(check *schema.CollateConstraint) {
+				ops = append(ops, &op.AddColumnConstraint{
+					Target: op.TargetColumn{
+						Schema: schem,
+						Table:  table,
+						Column: src,
+					},
+					Constraint: check.Node.(*ast.ColumnConstraint_Collate),
+				})
+			},
+		)
+	}
+
+	return ops
+}
+
+func (diff *Diff) DiffTableConstraint(table *ast.CatalogObjectIdentifier, a, b ast.TableConstraint) []op.Op {
+	ops := []op.Op{}
+
+	// i think we can only check for named constraints here
 
 	return ops
 }

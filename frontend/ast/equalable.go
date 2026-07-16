@@ -249,6 +249,34 @@ func (node *TableConstraint_Check) Eq(otherAny any) bool {
 	return Check(node.Expr, other.Expr)
 }
 
+func (node *TableConstraint_Unique) Eq(otherAny any) bool {
+	other, ok := As[TableConstraint_Unique](otherAny)
+	if !ok {
+		return false
+	}
+
+	// assume that named constraints are the same
+	if !CheckPtr(node.Name, other.Name) {
+		return false
+	}
+
+	if len(node.IndexedColumns) != len(other.IndexedColumns) {
+		return false
+	}
+
+	for i := range len(node.IndexedColumns) {
+		if !Check(&node.IndexedColumns[i], &other.IndexedColumns[i]) {
+			return false
+		}
+	}
+
+	if !CheckPtr(node.ConflictClause, other.ConflictClause) {
+		return false
+	}
+
+	return true
+}
+
 func (node *TableConstraint_PrimaryKey) Eq(otherAny any) bool {
 	other, ok := As[TableConstraint_PrimaryKey](otherAny)
 	if !ok {
@@ -256,7 +284,7 @@ func (node *TableConstraint_PrimaryKey) Eq(otherAny any) bool {
 	}
 
 	// assume that named constraints are the same
-	if CheckPtr(node.Name, other.Name) {
+	if !CheckPtr(node.Name, other.Name) {
 		return false
 	}
 
@@ -525,7 +553,7 @@ func (node *ColumnConstraint_Check) Eq(otherAny any) bool {
 		return false
 	}
 
-	if !Check(node.CheckExpr, other.CheckExpr) {
+	if !Check(node.Expr, other.Expr) {
 		return false
 	}
 
@@ -538,7 +566,7 @@ func (node *ColumnConstraint_Collate) Eq(otherAny any) bool {
 		return false
 	}
 
-	if !Check(&node.CollationName, &other.CollationName) {
+	if !Check(node.Collate, other.Collate) {
 		return false
 	}
 
