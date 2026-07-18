@@ -10,16 +10,16 @@ type Op interface {
 	ast.Equalable
 }
 
-func (*AddTable) isOp()            {}
-func (*DropTable) isOp()           {}
-func (*RenameTable) isOp()         {}
-func (*AddTableConstraint) isOp()  {}
-func (*DropTableConstraint) isOp() {}
-func (*AddColumn) isOp()           {}
-func (*DropColumn) isOp()          {}
-func (*RenameColumn) isOp()        {}
-func (*AddColumnConstraint) isOp() {}
-
+func (*AddTable) isOp()             {}
+func (*DropTable) isOp()            {}
+func (*RenameTable) isOp()          {}
+func (*AddTableConstraint) isOp()   {}
+func (*DropTableConstraint) isOp()  {}
+func (*AddColumn) isOp()            {}
+func (*DropColumn) isOp()           {}
+func (*RenameColumn) isOp()         {}
+func (*ChangeColumnType) isOp()     {}
+func (*AddColumnConstraint) isOp()  {}
 func (*DropColumnConstraint) isOp() {}
 
 type AddTable struct {
@@ -47,8 +47,8 @@ type DropTableConstraint struct {
 }
 
 type AddColumn struct {
-	Target           TargetTable
-	ColumnDefinition schema.ColumnLike
+	Target TargetTable
+	Column schema.ColumnLike
 }
 
 type DropColumn struct {

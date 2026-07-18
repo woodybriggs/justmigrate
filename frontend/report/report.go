@@ -32,12 +32,12 @@ func LabelFromKeyword(keyword ast.Keyword, note string) Label {
 func LabelFromExpr(expr ast.Expr, note string) Label {
 
 	source := getSourceFromExpr(expr)
-	tr := token.TextRange{}
-	getSourceRangeFromExpr(expr, &tr)
+	tr := token.NewTextRange()
+	getSourceRangeFromExpr(expr, tr)
 
 	return Label{
 		Source: source,
-		Range:  tr,
+		Range:  *tr,
 		Note:   note,
 	}
 }
@@ -55,6 +55,8 @@ func getSourceFromExpr(expr ast.Expr) lexer.SourceCode {
 	case *ast.LiteralFloat:
 		return expr.Token.SourceCode
 	case *ast.LiteralNull:
+		return expr.Token.SourceCode
+	case *ast.LiteralSignedInteger:
 		return expr.Token.SourceCode
 	case *ast.CaseExpression:
 		return getSourceFromExpr(expr.Cases[0].When)
@@ -95,6 +97,41 @@ func getSourceRangeFromExpr(expr ast.Expr, tr *token.TextRange) {
 			getSourceRangeFromExpr(whenthen.Then, tr)
 		}
 		getSourceRangeFromExpr(expr.Else, tr)
+	default:
+		panic("getSourceRangeFromExpr: unhandled expr type")
+	}
+}
+
+func LocationFromExpr(expr ast.Expr) token.Location {
+	switch expr := expr.(type) {
+	case *ast.BinaryOp:
+		return expr.Operator.FileLoc
+	case *ast.Identifier:
+		return expr.FileLoc
+	case *ast.LiteralNull:
+		return expr.Token.FileLoc
+	case *ast.LiteralBoolean:
+		return expr.Token.FileLoc
+	case *ast.LiteralFloat:
+		return expr.Token.FileLoc
+	case *ast.LiteralSignedInteger:
+		return expr.Token.FileLoc
+	case *ast.LiteralString:
+		return expr.Token.FileLoc
+	case *ast.LiteralUnsignedInteger:
+		return expr.Token.FileLoc
+	case *ast.FunctionCall:
+		return expr.Name.FileLoc
+	case *ast.CaseExpression:
+		return LocationFromExpr(expr.Cases[0].When)
+	case *ast.ColumnName:
+		return expr.Column.FileLoc
+	case ast.ExprList:
+		return LocationFromExpr(expr[0])
+	case *ast.ParseError:
+		return expr.ConsumedTokens[0].FileLoc
+	default:
+		panic("LocationFromExpr: unhandled expr type")
 	}
 }
 

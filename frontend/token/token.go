@@ -2,6 +2,7 @@ package token
 
 import (
 	"fmt"
+	"math"
 	"os"
 )
 
@@ -365,6 +366,13 @@ type TextRange struct {
 	End   int
 }
 
+func NewTextRange() *TextRange {
+	return &TextRange{
+		Start: math.MaxInt,
+		End:   math.MinInt,
+	}
+}
+
 func (tr *TextRange) ExtendBy(nr TextRange) {
 	if nr.Start < tr.Start {
 		tr.Start = nr.Start
@@ -461,6 +469,8 @@ func (t Token) DeletionCost() Cost {
 		return CostMid
 	case TokenKind_Identifier:
 		return CostMid
+	case TokenKind_IntegerNumericLiteral:
+		return CostHigh
 	default:
 		panic(fmt.Sprintf("insertion cost not defined for '%s'", t.String()))
 	}

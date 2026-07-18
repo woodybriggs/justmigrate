@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 
+	"woodybriggs/justmigrate/backend/diff"
 	schema "woodybriggs/justmigrate/backend/schema"
+	"woodybriggs/justmigrate/dialects/sqlite/generator"
 	"woodybriggs/justmigrate/dialects/sqlite/parser"
 	"woodybriggs/justmigrate/frontend/ast"
 	"woodybriggs/justmigrate/frontend/lexer"
@@ -128,13 +130,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	schemaA, err := schema.SchemaFromAst(srcAst)
+	schemaA, err := schema.SchemaFromAst("main", srcAst)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "invalid schema\n%v\n", err)
 		os.Exit(1)
 	}
 
-	schemaB, err := schema.SchemaFromAst(tgtAst)
+	schemaB, err := schema.SchemaFromAst("main", tgtAst)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "invalid schema\n%v\n", err)
 		os.Exit(1)
@@ -143,34 +145,33 @@ func main() {
 	_, _ = schemaA, schemaB
 
 	// perform a "diff" of the two ast and procude a set of transform ops
-	// differ := diff.Diff{}
-	// ops, err := differ.DiffSchema(srcAst, tgtAst)
-	// if err != nil {
-	// 	fmt.Fprintf(os.Stderr, "diff schema failed with err %v\n", err)
-	// 	os.Exit(1)
-	// }
+	differ := diff.Diff{}
+	ops, err := differ.DiffSchema(schemaA, schemaB)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "diff schema failed with err %v\n", err)
+		os.Exit(1)
+	}
 
 	// // validate, reoreder and optimize the ops
 	// {
 
 	// }
 
-	// // generate the schema changes needed from the ops
-	// gen := generator.SqliteFormatter{}
-	// ops, err = gen.Plan(srcAst, tgtAst, ops)
-	// type multiError interface {
-	// 	Error() string
-	// 	Unwrap() []error
-	// }
-	// if err != nil {
-	// 	if errs, ok := errors.AsType[multiError](err); ok {
-	// 		for _, report := range errs.Unwrap() {
-	// 			fmt.Println(report)
-	// 		}
-	// 	}
-	// }
+	// generate the schema changes needed from the ops
+	ops, err = generator.Plan(schemaA, ops)
+	type multiError interface {
+		Error() string
+		Unwrap() []error
+	}
+	if err != nil {
+		if errs, ok := errors.AsType[multiError](err); ok {
+			for _, report := range errs.Unwrap() {
+				fmt.Println(report)
+			}
+		}
+	}
 
-	// for _, op := range ops {
-	// 	fmt.Printf("%T, %+v\n", op, op)
-	// }
+	for _, op := range ops {
+		fmt.Printf("%T, %+v\n", op, op)
+	}
 }

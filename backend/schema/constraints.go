@@ -29,8 +29,23 @@ func (pk *PrimaryKey) Eq(otherPK any) bool {
 	return pk.Node.Eq(other.Node)
 }
 
-func PrimaryKeyFromTableConstraintAst(table *Table, constraint *ast.TableConstraint_PrimaryKey) (*PrimaryKey, error) {
-	result := &PrimaryKey{
+func PrimaryKeyFromTableConstraintAst(
+	table *Table,
+	constraints *TableConstraints,
+	constraint *ast.TableConstraint_PrimaryKey,
+) error {
+
+	if constraints.PK != nil {
+		return report.
+			NewReport("primary key already defined").
+			WithLocation(constraint.PrimaryKeyword.FileLoc).
+			WithLabels(
+				report.LabelFromIdentifier(*constraints.PK.Name, "primary key already defined here"),
+			)
+	}
+
+	errs := []error{}
+	pk := &PrimaryKey{
 		Node:            constraint,
 		IndexedColumns:  constraint.IndexedColumns,
 		ResolvedColumns: make([]ColumnLike, len(constraint.IndexedColumns)),
@@ -38,29 +53,63 @@ func PrimaryKeyFromTableConstraintAst(table *Table, constraint *ast.TableConstra
 	}
 
 	if constraint.Name != nil {
-		result.Name = &constraint.Name.Name
+		pk.Name = &constraint.Name.Name
 	}
 
+	// for each indexed column we check that it is a valid column
 	for i, indexedCol := range constraint.IndexedColumns {
 		ident, ok := indexedCol.Subject.(*ast.Identifier)
 		if !ok {
-			result.ResolvedColumns[i] = nil
+			errs = append(errs, report.
+				NewReport("semmantic error").
+				WithLocation(report.LocationFromExpr(indexedCol.Subject)).
+				WithMessage("expressions not supported in primary key indexed columns").
+				WithLabels(
+					report.LabelFromExpr(indexedCol.Subject, "this must be a column name within the table"),
+				),
+			)
 			continue
 		}
 
 		col, ok := table.Columns[ident.String()]
 		if !ok {
-			result.ResolvedColumns[i] = nil
+			errs = append(errs, report.
+				NewReport("semmantic error").
+				WithLocation(report.LocationFromExpr(indexedCol.Subject)).
+				WithMessage("column does not exist in table").
+				WithLabels(
+					report.LabelFromIdentifier(table.Node.TableIdentifier.ObjectName, "this table"),
+					report.LabelFromExpr(indexedCol.Subject, "does not declare this column"),
+				),
+			)
 			continue
 		}
 
-		result.ResolvedColumns[i] = col
+		if _, ok := col.(*GeneratedColumn); ok {
+			errs = append(errs, report.
+				NewReport("semmantic error").
+				WithLocation(report.LocationFromExpr(indexedCol.Subject)).
+				WithMessage("can not use generated columns in primary key constraint").
+				WithLabels(
+					report.LabelFromIdentifier(*col.GetName(), "this column"),
+					report.LabelFromExpr(indexedCol.Subject, "can not be used here"),
+				),
+			)
+			continue
+		}
+
+		pk.ResolvedColumns[i] = col
 	}
 
-	return result, nil
+	joinedErrs := errors.Join(errs...)
+	if joinedErrs == nil {
+		constraints.PK = pk
+	}
+
+	return joinedErrs
 }
 
-func PrimaryKeyFromColumnConstraintAst(colLike ColumnLike, constraints *ColumnConstraints, constraint *ast.ColumnConstraint_PrimaryKey) error {
+func PrimaryKeyFromColumnConstraintAst(column ColumnLike, constraints *ColumnConstraints, constraint *ast.ColumnConstraint_PrimaryKey) error {
 
 	if constraints.PK != nil {
 		// primary key already declared on column error
@@ -68,24 +117,28 @@ func PrimaryKeyFromColumnConstraintAst(colLike ColumnLike, constraints *ColumnCo
 			WithLocation(constraint.PrimaryKeyword.FileLoc).
 			WithMessage("column has already delcared a foreign key constraint").
 			WithLabels(
-				report.LabelFromKeyword(constraints.PK.Node.(*ast.ColumnConstraint_PrimaryKey).PrimaryKeyword, "previous primary key constraint declared here"),
+				report.LabelFromKeyword(constraints.PK.Node.(*ast.ColumnConstraint_PrimaryKey).PrimaryKeyword, "first primary key constraint declared here"),
+				report.LabelFromKeyword(constraint.PrimaryKeyword, "second primary key constraint declared here"),
 			)
 	}
 
-	constraints.PK = &PrimaryKey{
+	localPK := &PrimaryKey{
 		Node: constraint,
 		IndexedColumns: []ast.IndexedColumn{
 			{
-				Subject: colLike.GetName(),
+				Subject: column.GetName(),
 				Order:   constraint.Order,
 			},
 		},
-		ConflictClause: ConflictClauseFromAst(constraint.ConflictClause),
+		ResolvedColumns: []ColumnLike{column},
+		ConflictClause:  ConflictClauseFromAst(constraint.ConflictClause),
 	}
 
 	if constraint.Name != nil {
-		constraints.PK.Name = &constraint.Name.Name
+		localPK.Name = &constraint.Name.Name
 	}
+
+	constraints.PK = localPK
 
 	return nil
 }
@@ -117,8 +170,9 @@ type unresolvedForeignKey struct {
 }
 
 type ForeignKey struct {
-	AstNode interface {
+	Node interface {
 		Accept(ast.Visitor)
+		Equalable
 	}
 
 	// FromTable is the table defining the foreign key constraint (the "child" table).
@@ -132,7 +186,16 @@ type ForeignKey struct {
 	ToColumns []ColumnLike
 }
 
-func ForeignKeyFromColumnConstraintAst(colLike ColumnLike, constraints *ColumnConstraints, constraint *ast.ColumnConstraint_ForeignKey) error {
+func (fk *ForeignKey) Eq(otherAny any) bool {
+	other, ok := otherAny.(*ForeignKey)
+	if !ok {
+		return false
+	}
+
+	return fk.Node.Eq(other.Node)
+}
+
+func ForeignKeyFromColumnConstraintAst(colName *ast.Identifier, constraints *ColumnConstraints, constraint *ast.ColumnConstraint_ForeignKey) error {
 
 	if constraints.FK != nil {
 		// error foreign key already declared on column
@@ -140,19 +203,16 @@ func ForeignKeyFromColumnConstraintAst(colLike ColumnLike, constraints *ColumnCo
 			WithLocation(constraint.FkClause.ReferencesKeyword.FileLoc).
 			WithMessage("column has already delcared a foreign key constraint").
 			WithLabels(
-				report.LabelFromKeyword(constraints.FK.AstNode.(*ast.ColumnConstraint_ForeignKey).FkClause.ReferencesKeyword, "previous foreign key constraint declared here"),
+				report.LabelFromKeyword(constraints.FK.Node.(*ast.ColumnConstraint_ForeignKey).FkClause.ReferencesKeyword, "previous foreign key constraint declared here"),
 			)
 	}
 
 	constraints.FK = &ForeignKey{
-		AstNode: constraint,
+		Node: constraint,
 		Unresolved: unresolvedForeignKey{
-			FromColumns: []ast.Identifier{
-				*colLike.GetName(),
-			},
-
-			ToTable:   &constraint.FkClause.ForeignTable,
-			ToColumns: constraint.FkClause.ForeignColumns,
+			FromColumns: []ast.Identifier{*colName},
+			ToTable:     &constraint.FkClause.ForeignTable,
+			ToColumns:   constraint.FkClause.ForeignColumns,
 		},
 	}
 
@@ -163,11 +223,11 @@ func ForeignKeyFromTableConstraintAst(table *Table, constraint *ast.TableConstra
 	errs := []error{}
 
 	result := &ForeignKey{
-		AstNode:     constraint,
+		Node:        constraint,
 		FromTable:   table,
 		FromColumns: make([]ColumnLike, len(constraint.Columns)),
 		Unresolved: unresolvedForeignKey{
-			FromTable:   table.CreateTable.TableIdentifier,
+			FromTable:   table.Node.TableIdentifier,
 			FromColumns: constraint.Columns,
 			ToTable:     &constraint.FkClause.ForeignTable,
 			ToColumns:   make([]ast.Identifier, len(constraint.FkClause.ForeignColumns)),
@@ -184,7 +244,7 @@ func ForeignKeyFromTableConstraintAst(table *Table, constraint *ast.TableConstra
 				NewReport("invalid foreign key definition").
 				WithLocation(fromCol.FileLoc).
 				WithLabels(
-					report.LabelFromIdentifier(table.CreateTable.TableIdentifier.ObjectName, fmt.Sprintf("this table does not define column '%v'", fromCol.Text)),
+					report.LabelFromIdentifier(table.Node.TableIdentifier.ObjectName, fmt.Sprintf("this table does not define column '%v'", fromCol.Text)),
 					report.LabelFromIdentifier(fromCol, "this column does not exist"),
 				)
 
@@ -219,7 +279,7 @@ func (u *Unique) Eq(otherUnique any) bool {
 	return u.Node.Eq(other.Node)
 }
 
-func UniqueFromColumnConstraintAst(colLike ColumnLike, constraints *ColumnConstraints, constraint *ast.ColumnConstraint_Unique) error {
+func UniqueFromColumnConstraintAst(colName *ast.Identifier, constraints *ColumnConstraints, constraint *ast.ColumnConstraint_Unique) error {
 
 	if constraints.Unique != nil {
 		// unique is already declared error
@@ -234,7 +294,7 @@ func UniqueFromColumnConstraintAst(colLike ColumnLike, constraints *ColumnConstr
 	constraints.Unique = &Unique{
 		Node: constraint,
 		IndexedColumns: []ast.IndexedColumn{
-			{Subject: colLike.GetName()},
+			{Subject: colName},
 		},
 		ConflictAction: ConflictClauseFromAst(constraint.ConflictClause),
 	}
@@ -324,6 +384,15 @@ type CollateConstraint struct {
 	Collate *ast.Identifier
 }
 
+func (cc *CollateConstraint) Eq(otherAny any) bool {
+	other, ok := otherAny.(*CollateConstraint)
+	if !ok {
+		return false
+	}
+
+	return cc.Node.Eq(other.Node)
+}
+
 func CollateConstraintFromColumnConstraintAst(constraints *ColumnConstraints, constraint *ast.ColumnConstraint_Collate) error {
 	if constraints.Collate != nil {
 		return report.NewReport("duplicate column constraint").
@@ -349,6 +418,15 @@ type NotNull struct {
 	Node           *ast.ColumnConstraint_NotNull
 	Name           *ast.Identifier
 	ConflictClause ConflictAction
+}
+
+func (nn *NotNull) Eq(otherAny any) bool {
+	other, ok := otherAny.(*NotNull)
+	if !ok {
+		return false
+	}
+
+	return nn.ConflictClause == other.ConflictClause
 }
 
 func NotNullFromColumnConstraint(constraints *ColumnConstraints, constraint *ast.ColumnConstraint_NotNull) error {
@@ -380,6 +458,15 @@ type Default struct {
 
 	Name *ast.Identifier
 	Expr ast.Expr
+}
+
+func (def *Default) Eq(otherAny any) bool {
+	other, ok := otherAny.(*Default)
+	if !ok {
+		return false
+	}
+
+	return other.Node.Eq(other.Node)
 }
 
 func DefaultFromColumnConstraint(constraints *ColumnConstraints, constraint *ast.ColumnConstraint_Default) error {

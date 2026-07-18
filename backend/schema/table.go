@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"woodybriggs/justmigrate/errext"
 	"woodybriggs/justmigrate/frontend/ast"
 	"woodybriggs/justmigrate/frontend/report"
 )
@@ -16,8 +17,9 @@ type TableConstraints struct {
 }
 
 type Table struct {
-	CreateTable *ast.CreateTable
+	Node        *ast.CreateTable
 	Name        string
+	Temporary   bool
 	Columns     map[string]ColumnLike
 	Constraints TableConstraints
 	Indexes     []*Index
@@ -28,30 +30,100 @@ func (t *Table) Eq(otherTable any) bool {
 	if !ok {
 		return false
 	}
-	return t.CreateTable.Eq(other.CreateTable)
+	return t.Node.Eq(other.Node)
 }
 
-func TableFromAst(createTable *ast.CreateTable) (*Table, error) {
+func (table *Table) AddConstraint(constraint ast.TableConstraint) error {
+	errs := []error{}
+	switch constraint := constraint.(type) {
+	case *ast.TableConstraint_PrimaryKey:
+		{
+			err := PrimaryKeyFromTableConstraintAst(table, &table.Constraints, constraint)
+			if err != nil {
+				errs = append(errs, errext.UnwrapAll(err)...)
+			}
+		}
+	case *ast.TableConstraint_ForeignKey:
+		{
+			foreignKey, err := ForeignKeyFromTableConstraintAst(table, constraint)
+			if err != nil {
+				errs = append(errs, errext.UnwrapAll(err)...)
+			} else {
+				table.Constraints.FKs = append(table.Constraints.FKs, foreignKey)
+			}
+		}
+	case *ast.TableConstraint_Check:
+		{
+			check, err := CheckFromTableConstraintAst(table, constraint)
+			if err != nil {
+				errs = append(errs, errext.UnwrapAll(err)...)
+			} else {
+				table.Constraints.Checks = append(table.Constraints.Checks, check)
+			}
+		}
+	case *ast.TableConstraint_Unique:
+		{
+			unique, err := UniqueFromTableConstraintAst(table, constraint)
+			if err != nil {
+				errs = append(errs, errext.UnwrapAll(err)...)
+			} else {
+				table.Constraints.Uniques = append(table.Constraints.Uniques, unique)
+			}
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func (table *Table) DropConstraint(constraint ast.TableConstraint) error {
+	switch constraint := constraint.(type) {
+	case *ast.TableConstraint_PrimaryKey:
+		{
+			if !table.Constraints.PK.Node.Eq(constraint) {
+				panic("DropConstraint: pk does not match")
+			}
+
+			table.Constraints.PK = nil
+		}
+	case *ast.TableConstraint_ForeignKey:
+		{
+			table.Constraints.FKs = slices.DeleteFunc(table.Constraints.FKs, func(other *ForeignKey) bool {
+				return other.Node.Eq(constraint)
+			})
+		}
+	case *ast.TableConstraint_Check:
+		{
+			table.Constraints.Checks = slices.DeleteFunc(table.Constraints.Checks, func(other *Check) bool {
+				return other.Node.Eq(constraint)
+			})
+		}
+	case *ast.TableConstraint_Unique:
+		{
+			table.Constraints.Uniques = slices.DeleteFunc(table.Constraints.Uniques, func(other *Unique) bool {
+				return other.Node.Eq(constraint)
+			})
+		}
+	}
+
+	return nil
+}
+
+func TableFromAst(statement *ast.CreateTable) (*Table, error) {
 	// this is where we validate that the table is "correct" by itself
-
-	// 1. normalize constraints at the column level up to the table constraints
-	// 2. check that table constraint primary keys actually index columns that exist in the table
-	// 3. check that foreign key columns actually exist in the table (no need to check for foreign column existance)
-	// 4. check that table constraint check exprs that depend on table column, are real cols
-
 	errs := []error{}
 
 	table := &Table{
-		CreateTable: createTable,
-		Name:        createTable.TableIdentifier.String(),
+		Node:        statement,
+		Name:        statement.TableIdentifier.String(),
+		Temporary:   statement.Temporary != nil,
 		Columns:     map[string]ColumnLike{},
 		Constraints: TableConstraints{},
 	}
 
 	// add all the columns
-	for i := range createTable.TableDefinition.ColumnDefinitions {
+	for i := range statement.TableDefinition.ColumnDefinitions {
 
-		colDef := &createTable.TableDefinition.ColumnDefinitions[i]
+		colDef := &statement.TableDefinition.ColumnDefinitions[i]
 
 		// determine if this column is generated or a regular column
 		// we do this here because we populate the table as we add columns
@@ -66,35 +138,31 @@ func TableFromAst(createTable *ast.CreateTable) (*Table, error) {
 		var colLike ColumnLike = nil
 		if isGenerated >= 0 {
 			column := &GeneratedColumn{}
-			err := GeneratedColumnFromAst(table, column, colDef)
+			table.Columns[colDef.ColumnName.String()] = column
+			err := GeneratedColumnFromAst(column, colDef)
 			if err != nil {
-				if colErrs, ok := err.(interface{ Unwrap() []error }); ok {
-					errs = append(errs, colErrs.Unwrap()...)
-				} else {
-					errs = append(errs, err)
-				}
+				errs = append(errs, errext.UnwrapAll(err)...)
 				continue
 			}
 			colLike = column
 		} else {
 			column := &Column{}
-			err := ColumnFromAst(table, column, &createTable.TableDefinition.ColumnDefinitions[i])
+			table.Columns[colDef.ColumnName.String()] = column
+			err := ColumnFromAst(column, &statement.TableDefinition.ColumnDefinitions[i])
 			if err != nil {
-				if colErrs, ok := err.(interface{ Unwrap() []error }); ok {
-					errs = append(errs, colErrs.Unwrap()...)
-				} else {
-					errs = append(errs, err)
-				}
+				errs = append(errs, errext.UnwrapAll(err)...)
 				continue
 			}
 			colLike = column
 		}
-
-		table.Columns[colLike.GetName().String()] = colLike
-
+		// we want to add all of the table relevant constraints that were picked up
+		// in the columns, so that we can make sure that they do not conflict with table constraints
+		// defined at the table level. so we add them to the table here, in prep for the validation of
+		// table constraints
 		constraints := colLike.GetConstraints()
 
 		if constraints.PK != nil {
+			// a table can only have one primary key
 			table.Constraints.PK = constraints.PK
 		}
 
@@ -111,6 +179,14 @@ func TableFromAst(createTable *ast.CreateTable) (*Table, error) {
 		}
 	}
 
+	// add all the constraints
+	for _, constraint := range statement.TableDefinition.TableConstraints {
+		err := table.AddConstraint(constraint)
+		if err != nil {
+			errs = append(errs, errext.UnwrapAll(err)...)
+		}
+	}
+
 	// now that the table has been fully defined, we need to resolve the internal wiring of fk
 	for _, fk := range table.Constraints.FKs {
 		// column defined fks need to be updated now that the table is fully defined
@@ -120,14 +196,14 @@ func TableFromAst(createTable *ast.CreateTable) (*Table, error) {
 
 		fk.FromColumns = make([]ColumnLike, len(fk.Unresolved.FromColumns))
 		for i, fromCol := range fk.Unresolved.FromColumns {
-			col, ok := table.Columns[fromCol.Text]
+			col, ok := table.Columns[fromCol.String()]
 			if !ok {
 				// this is an symantic error, the local column does not exist
 				err := report.
 					NewReport("invalid foreign key definition").
 					WithLocation(fromCol.FileLoc).
 					WithLabels(
-						report.LabelFromIdentifier(table.CreateTable.TableIdentifier.ObjectName, fmt.Sprintf("this table does not define column '%v'", fromCol.Text)),
+						report.LabelFromIdentifier(table.Node.TableIdentifier.ObjectName, fmt.Sprintf("this table does not define column '%v'", fromCol.Text)),
 						report.LabelFromIdentifier(fromCol, "this column does not exist"),
 					)
 
@@ -142,83 +218,5 @@ func TableFromAst(createTable *ast.CreateTable) (*Table, error) {
 		}
 	}
 
-	// add all the constraints
-	for i := range createTable.TableDefinition.TableConstraints {
-		switch constraint := createTable.TableDefinition.TableConstraints[i].(type) {
-		case *ast.TableConstraint_PrimaryKey:
-			{
-				if table.Constraints.PK != nil {
-					err := report.
-						NewReport("primary key already defined").
-						WithLocation(constraint.PrimaryKeyword.FileLoc).
-						WithLabels(
-							report.LabelFromIdentifier(*table.Constraints.PK.Name, "primary key already defined here"),
-						)
-					errs = append(errs, err)
-					continue
-				}
-
-				primaryKey, err := PrimaryKeyFromTableConstraintAst(table, constraint)
-				if err != nil {
-					if pkErrs, ok := err.(interface{ Unwrap() []error }); ok {
-						errs = append(errs, pkErrs.Unwrap()...)
-					} else {
-						errs = append(errs, err)
-					}
-					continue
-				}
-
-				table.Constraints.PK = primaryKey
-			}
-		case *ast.TableConstraint_ForeignKey:
-			{
-				foreignKey, err := ForeignKeyFromTableConstraintAst(table, constraint)
-				if err != nil {
-					if fkErrs, ok := err.(interface{ Unwrap() []error }); ok {
-						errs = append(errs, fkErrs.Unwrap()...)
-					} else {
-						errs = append(errs, err)
-					}
-					continue
-				}
-
-				table.Constraints.FKs = append(table.Constraints.FKs, foreignKey)
-			}
-		case *ast.TableConstraint_Check:
-			{
-				check, err := CheckFromTableConstraintAst(table, constraint)
-				if err != nil {
-					if ckErrs, ok := err.(interface{ Unwrap() []error }); ok {
-						errs = append(errs, ckErrs.Unwrap()...)
-					} else {
-						errs = append(errs, err)
-					}
-					continue
-				}
-
-				table.Constraints.Checks = append(table.Constraints.Checks, check)
-			}
-		case *ast.TableConstraint_Unique:
-			{
-				unique, err := UniqueFromTableConstraintAst(table, constraint)
-				if err != nil {
-					if fkErrs, ok := err.(interface{ Unwrap() []error }); ok {
-						errs = append(errs, fkErrs.Unwrap()...)
-					} else {
-						errs = append(errs, err)
-					}
-					continue
-				}
-
-				table.Constraints.Uniques = append(table.Constraints.Uniques, unique)
-			}
-		}
-
-	}
-
 	return table, errors.Join(errs...)
-}
-
-func validateCheckExpr(table *Table, expr ast.Expr) error {
-	return nil
 }

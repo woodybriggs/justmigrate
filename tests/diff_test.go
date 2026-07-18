@@ -24,7 +24,7 @@ CREATE TABLE users (
 
 CREATE TABLE orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id),
     total_amount REAL,
     shipping_address TEXT NOT NULL, 
     CONSTRAINT valid_total CHECK (total_amount >= 0)
@@ -50,7 +50,7 @@ CREATE TABLE users (
 
 CREATE TABLE orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES product_reviews(user_id),
     total_amount REAL,
 	-- NEW COLUMN: Added 'status'
     status TEXT DEFAULT 'cart',
@@ -92,7 +92,7 @@ func loadSchema(filename string, src string) (*schema.Schema, error) {
 	l := lexer.NewLexer(sourceCode)
 	p := parser.NewSqliteParser(l)
 	ast := p.Statements()
-	schema, err := schema.SchemaFromAst(ast)
+	schema, err := schema.SchemaFromAst("main", ast)
 
 	return schema, err
 }
@@ -172,9 +172,8 @@ func Test_DiffSchema(t *testing.T) {
 		t.Fatalf("failed to diff schema %s", err)
 	}
 
-	ordersTable := schemaA.Tables["orders"]
 	column := schema.Column{}
-	err = schema.ColumnFromAst(ordersTable, &column, statusColumnDefinition)
+	err = schema.ColumnFromAst(&column, statusColumnDefinition)
 	if err != nil {
 		t.Fatalf("%v", err.Error())
 		t.FailNow()
@@ -243,7 +242,7 @@ func Test_DiffSchema(t *testing.T) {
 				Schema: schemaA,
 				Table:  schemaA.Tables["orders"],
 			},
-			ColumnDefinition: &column,
+			Column: &column,
 		},
 		&op.DropTableConstraint{
 			Target: op.TargetTableConstraint{

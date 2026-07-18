@@ -30,6 +30,7 @@ type TableConstraint interface {
 	Equalable
 	Accept(Visitor)
 	nodeTableConstraint()
+	GetConstraintName() *Identifier
 }
 
 func (node *TableConstraint_Check) nodeTableConstraint()      {}
@@ -37,6 +38,34 @@ func (node *TableConstraint_PrimaryKey) nodeTableConstraint() {}
 func (node *TableConstraint_ForeignKey) nodeTableConstraint() {}
 func (node *TableConstraint_Unique) nodeTableConstraint()     {}
 func (node *ParseError) nodeTableConstraint()                 {}
+
+func (node *TableConstraint_Check) GetConstraintName() *Identifier {
+	if node.Name != nil {
+		return &node.Name.Name
+	}
+	return nil
+}
+
+func (node *TableConstraint_PrimaryKey) GetConstraintName() *Identifier {
+	if node.Name != nil {
+		return &node.Name.Name
+	}
+	return nil
+}
+
+func (node *TableConstraint_ForeignKey) GetConstraintName() *Identifier {
+	if node.Name != nil {
+		return &node.Name.Name
+	}
+	return nil
+}
+
+func (node *TableConstraint_Unique) GetConstraintName() *Identifier {
+	if node.Name != nil {
+		return &node.Name.Name
+	}
+	return nil
+}
 
 type ColumnConstraint interface {
 	Equalable

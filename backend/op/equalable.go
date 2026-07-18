@@ -120,7 +120,7 @@ func (op *AddColumn) Eq(otherAny any) bool {
 		return false
 	}
 
-	return op.ColumnDefinition.Eq(other.ColumnDefinition)
+	return op.Column.Eq(other.Column)
 }
 
 func (op *RenameColumn) Eq(otherAny any) bool {
@@ -134,6 +134,19 @@ func (op *RenameColumn) Eq(otherAny any) bool {
 	}
 
 	return op.NewName.Eq(other.NewName)
+}
+
+func (op *ChangeColumnType) Eq(otherAny any) bool {
+	other, ok := otherAny.(*ChangeColumnType)
+	if !ok {
+		return ok
+	}
+
+	if !other.Target.Eq(other.Target) {
+		return false
+	}
+
+	return op.NewType.Eq(other.NewType)
 }
 
 func (op *DropColumnConstraint) Eq(otherAny any) bool {

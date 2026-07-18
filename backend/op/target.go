@@ -35,5 +35,6 @@ type TargetColumnConstraint struct {
 
 type TargetIndex struct {
 	Schema *schema.Schema
+	Table  *schema.Table
 	Index  *schema.Index
 }

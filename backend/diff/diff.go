@@ -55,7 +55,7 @@ func resolveMissingColumns(
 						Schema: schem,
 						Table:  table,
 					},
-					ColumnDefinition: newCol,
+					Column: newCol,
 				},
 			},
 		}
@@ -91,7 +91,7 @@ func resolveMissingColumns(
 			ops = append(ops, operation)
 		case *op.AddColumn:
 			// add the new column to final added
-			finalAdded = append(finalAdded, operation.ColumnDefinition)
+			finalAdded = append(finalAdded, operation.Column)
 		}
 	}
 	// any unresolved removed columns are now final as removed
@@ -147,7 +147,7 @@ func resolveMissingTables(
 						Schema: schem,
 						Table:  unresolved,
 					},
-					NewName: newTable.CreateTable.TableIdentifier,
+					NewName: newTable.Node.TableIdentifier,
 				},
 			})
 		}
@@ -163,7 +163,7 @@ func resolveMissingTables(
 		case *op.RenameTable:
 			// remove the From table from the unresolved table as it is now resolved
 			unresolvedRemovedTables = slices.DeleteFunc(unresolvedRemovedTables, func(table *schema.Table) bool {
-				return table.CreateTable.TableIdentifier.Eq(operation.NewName)
+				return table.Node.TableIdentifier.Eq(operation.NewName)
 			})
 			// add the rename op to the output
 			ops = append(ops, operation)
@@ -178,11 +178,13 @@ func resolveMissingTables(
 	return
 }
 
-func diffState[T any](a, b *T, ifA, ifB func(*T)) {
+func diffState[T any](a, b *T, ifA, ifB func(*T), cmp func(a, b *T)) {
 	if a != nil && b == nil {
 		ifA(a)
 	} else if a == nil && b != nil {
 		ifB(b)
+	} else if a != nil && b != nil {
+		cmp(a, b)
 	}
 }
 
@@ -191,7 +193,7 @@ func (diff *Diff) DiffSchema(src, tgt *schema.Schema) (ops []op.Op, err error) {
 	// Compare all create table statements
 	{
 		isSameTable := func(a *schema.Table, b *schema.Table) bool {
-			return a.CreateTable.TableIdentifier.Eq(b.CreateTable.TableIdentifier)
+			return a.Node.TableIdentifier.Eq(b.Node.TableIdentifier)
 		}
 
 		a := slices.Collect(maps.Values(src.Tables))
@@ -266,7 +268,7 @@ func (diff *Diff) DiffCreateTable(schem *schema.Schema, src, tgt *schema.Table) 
 					Schema: schem,
 					Table:  src,
 				},
-				ColumnDefinition: addedColumn,
+				Column: addedColumn,
 			})
 		}
 
@@ -280,83 +282,93 @@ func (diff *Diff) DiffCreateTable(schem *schema.Schema, src, tgt *schema.Table) 
 		}
 	}
 
-	// check for changes in primary keys
-	if false {
-	} else if src.Constraints.PK == nil && tgt.Constraints.PK != nil {
-		// primary key added
-		switch pk := tgt.Constraints.PK.Node.(type) {
-		case *ast.ColumnConstraint_PrimaryKey:
-			if len(tgt.Constraints.PK.ResolvedColumns) != 1 {
-				err := report.NewReport("malformed primary key column constraint").
-					WithMessage("a primary key column constraint, can only have one resolved column").
-					WithLabels(
-						report.LabelFromKeyword(pk.PrimaryKeyword, "this primary key"),
-					)
-				// @TODO(woody): don't know how to handle this error
-				// we are in an invariant of this codebase not a user error
-				panic(err)
-			}
+	diffState(
+		src.Constraints.PK, tgt.Constraints.PK,
+		func(pk *schema.PrimaryKey) {
+			switch pk := tgt.Constraints.PK.Node.(type) {
+			case *ast.ColumnConstraint_PrimaryKey:
+				if len(tgt.Constraints.PK.ResolvedColumns) != 1 {
+					err := report.NewReport("malformed primary key column constraint").
+						WithMessage("a primary key column constraint can only have one resolved column").
+						WithLabels(
+							report.LabelFromKeyword(pk.PrimaryKeyword, "this primary key"),
+						)
+					// @TODO(woody): don't know how to handle this error
+					// we are in an invariant of this codebase not a user error
+					panic(err)
+				}
 
-			targetColumnName := tgt.Constraints.PK.ResolvedColumns[0].GetName().String()
-			targetColumn := src.Columns[targetColumnName]
+				targetColumnName := tgt.Constraints.PK.ResolvedColumns[0].GetName().String()
+				targetColumn := src.Columns[targetColumnName]
 
-			ops = append(ops, &op.AddColumnConstraint{
-				Target: op.TargetColumn{
-					Schema: schem,
-					Table:  src,
-					Column: targetColumn,
-				},
-				Constraint: pk,
-			})
-		case *ast.TableConstraint_PrimaryKey:
-			ops = append(ops, &op.AddTableConstraint{
-				Target: op.TargetTable{
-					Schema: schem,
-					Table:  src,
-				},
-				Constraint: pk,
-			})
-		}
-	} else if src.Constraints.PK != nil && tgt.Constraints.PK == nil {
-		// primary key removed
-		switch pk := src.Constraints.PK.Node.(type) {
-		case *ast.ColumnConstraint_PrimaryKey:
-			if len(src.Constraints.PK.ResolvedColumns) != 1 {
-				err := report.NewReport("malformed primary key column constraint").
-					WithMessage("a primary key column constraint, can only have one resolved column").
-					WithLabels(
-						report.LabelFromKeyword(pk.PrimaryKeyword, "this primary key"),
-					)
-				// @TODO(woody): don't know how to handle this error
-				// we are in an invariant of this codebase not a user error
-				panic(err)
-			}
-
-			targetColumn := src.Constraints.PK.ResolvedColumns[0]
-
-			ops = append(ops, &op.DropColumnConstraint{
-				Target: op.TargetColumnConstraint{
-					Schema:     schem,
-					Table:      src,
-					Column:     targetColumn,
+				ops = append(ops, &op.AddColumnConstraint{
+					Target: op.TargetColumn{
+						Schema: schem,
+						Table:  src,
+						Column: targetColumn,
+					},
 					Constraint: pk,
-				},
-			})
-		case *ast.TableConstraint_PrimaryKey:
-			ops = append(ops, &op.DropTableConstraint{
-				Target: op.TargetTableConstraint{
-					Schema:     schem,
-					Table:      src,
+				})
+			case *ast.TableConstraint_PrimaryKey:
+				ops = append(ops, &op.AddTableConstraint{
+					Target: op.TargetTable{
+						Schema: schem,
+						Table:  src,
+					},
 					Constraint: pk,
-				},
-			})
-		}
-	} else if !src.Constraints.PK.Eq(tgt.Constraints.PK) {
-		// primary key changed
-		panic("not implemented")
-	}
+				})
+			}
+		},
+		func(pk *schema.PrimaryKey) {
+			switch pk := src.Constraints.PK.Node.(type) {
+			case *ast.ColumnConstraint_PrimaryKey:
+				if len(src.Constraints.PK.ResolvedColumns) != 1 {
+					err := report.NewReport("malformed primary key column constraint").
+						WithMessage("a primary key column constraint can only have one resolved column").
+						WithLabels(
+							report.LabelFromKeyword(pk.PrimaryKeyword, "this primary key"),
+						)
+					// @TODO(woody): don't know how to handle this error
+					// we are in an invariant of this codebase not a user error
+					panic(err)
+				}
+
+				targetColumn := src.Constraints.PK.ResolvedColumns[0]
+
+				ops = append(ops, &op.DropColumnConstraint{
+					Target: op.TargetColumnConstraint{
+						Schema:     schem,
+						Table:      src,
+						Column:     targetColumn,
+						Constraint: pk,
+					},
+				})
+			case *ast.TableConstraint_PrimaryKey:
+				ops = append(ops, &op.DropTableConstraint{
+					Target: op.TargetTableConstraint{
+						Schema:     schem,
+						Table:      src,
+						Constraint: pk,
+					},
+				})
+			}
+		},
+		func(a, b *schema.PrimaryKey) {
+			// both tables have a primary key, we need to check if it has changed
+			// panic("TODO(woody): check if primary key has changed")
+		},
+	)
 
 	// @TODO(woody): need to do foreign keys
+	{
+		a := src.Constraints.FKs
+		b := tgt.Constraints.FKs
+
+		maybeRemoved, maybeAdded := symmetricDifference(a, b)
+		maybeModified := intersection(maybeRemoved, maybeAdded)
+
+		_ = maybeModified
+	}
 
 	{
 		// check for changes in CHECK constraints
@@ -434,7 +446,6 @@ func (diff *Diff) DiffColumnDefinition(schem *schema.Schema, table *schema.Table
 				// if they are the same type we can break out and continue diffing
 				break
 			}
-
 			// if the tgt col is a generated column
 			// we need to drop the column, and create the generated column
 			// this would be destructive and cause data loss
@@ -447,7 +458,6 @@ func (diff *Diff) DiffColumnDefinition(schem *schema.Schema, table *schema.Table
 				// if they are the same type we can break out and continue diffing
 				break
 			}
-
 			// if the tgt col is a regular column
 			// we need to drop the generated column, create the regular column
 			// this would be destructive and cause data loss
@@ -461,9 +471,21 @@ func (diff *Diff) DiffColumnDefinition(schem *schema.Schema, table *schema.Table
 		}
 	}
 
-	// if !src.TypeName.Eq(tgt.TypeName) {
-	// 	ops = append(ops, &ChangeColTypeOp{Table: table, Col: &src.ColumnName, TypeName: tgt.TypeName})
-	// }
+	diffState(
+		src.GetType(), tgt.GetType(),
+		func(a *schema.Type) {
+			panic("TODO(woody): type has been dropped")
+		},
+		func(b *schema.Type) {
+			panic("TODO(woody): type has been added")
+		},
+		func(a, b *schema.Type) {
+			if a.Eq(b) {
+				return
+			}
+			panic("@TODO(woody): check if type has changed")
+		},
+	)
 
 	{
 		a := src.GetConstraints()
@@ -471,169 +493,212 @@ func (diff *Diff) DiffColumnDefinition(schem *schema.Schema, table *schema.Table
 
 		diffState(
 			a.NotNull, b.NotNull,
-			func(notnull *schema.NotNull) {
+			func(a *schema.NotNull) {
 				ops = append(ops, &op.DropColumnConstraint{
 					Target: op.TargetColumnConstraint{
 						Schema:     schem,
 						Table:      table,
 						Column:     src,
-						Constraint: notnull.Node,
+						Constraint: a.Node,
 					},
 				})
 			},
-			func(notnull *schema.NotNull) {
+			func(b *schema.NotNull) {
 				ops = append(ops, &op.AddColumnConstraint{
 					Target: op.TargetColumn{
 						Schema: schem,
 						Table:  table,
 						Column: src,
 					},
-					Constraint: notnull.Node,
+					Constraint: b.Node,
 				})
+			},
+			func(a, b *schema.NotNull) {
+				if a.Eq(b) {
+					return
+				}
+				panic("@TODO(woody): check if conflict clause has changed")
 			},
 		)
 
 		diffState(
 			a.Default, b.Default,
-			func(d *schema.Default) {
+			func(a *schema.Default) {
 				ops = append(ops, &op.DropColumnConstraint{
 					Target: op.TargetColumnConstraint{
 						Schema:     schem,
 						Table:      table,
 						Column:     src,
-						Constraint: d.Node,
+						Constraint: a.Node,
 					},
 				})
 			},
-			func(d *schema.Default) {
+			func(b *schema.Default) {
 				ops = append(ops, &op.AddColumnConstraint{
 					Target: op.TargetColumn{
 						Schema: schem,
 						Table:  table,
 						Column: src,
 					},
-					Constraint: d.Node,
+					Constraint: b.Node,
 				})
+			},
+			func(a, b *schema.Default) {
+				if a.Eq(b) {
+					return
+				}
+				panic("@TODO(woody): check if expression has changed")
 			},
 		)
 
 		diffState(
 			a.Unique, b.Unique,
-			func(unique *schema.Unique) {
+			func(a *schema.Unique) {
 				ops = append(ops, &op.DropColumnConstraint{
 					Target: op.TargetColumnConstraint{
 						Schema:     schem,
 						Table:      table,
 						Column:     src,
-						Constraint: unique.Node.(*ast.ColumnConstraint_Unique),
+						Constraint: a.Node.(*ast.ColumnConstraint_Unique),
 					},
 				})
 			},
-			func(unique *schema.Unique) {
+			func(b *schema.Unique) {
 				ops = append(ops, &op.AddColumnConstraint{
 					Target: op.TargetColumn{
 						Schema: schem,
 						Table:  table,
 						Column: src,
 					},
-					Constraint: unique.Node.(*ast.ColumnConstraint_Unique),
+					Constraint: b.Node.(*ast.ColumnConstraint_Unique),
 				})
+			},
+			func(a, b *schema.Unique) {
+				if a.Eq(b) {
+					return
+				}
+				panic("@TODO(woody): check if indexed columns have changed, or conflict clause")
 			},
 		)
 
 		diffState(
 			a.FK, b.FK,
-			func(fk *schema.ForeignKey) {
+			func(a *schema.ForeignKey) {
 				ops = append(ops, &op.DropColumnConstraint{
 					Target: op.TargetColumnConstraint{
 						Schema:     schem,
 						Table:      table,
 						Column:     src,
-						Constraint: fk.AstNode.(*ast.ColumnConstraint_ForeignKey),
+						Constraint: a.Node.(*ast.ColumnConstraint_ForeignKey),
 					},
 				})
 			},
-			func(fk *schema.ForeignKey) {
+			func(b *schema.ForeignKey) {
 				ops = append(ops, &op.AddColumnConstraint{
 					Target: op.TargetColumn{
 						Schema: schem,
 						Table:  table,
 						Column: src,
 					},
-					Constraint: fk.AstNode.(*ast.ColumnConstraint_ForeignKey),
+					Constraint: b.Node.(*ast.ColumnConstraint_ForeignKey),
 				})
+			},
+			func(a, b *schema.ForeignKey) {
+				if a.Eq(b) {
+					return
+				}
+
+				panic("@TODO(woody): check if foreign key has changed")
 			},
 		)
 
 		diffState(
 			a.PK, b.PK,
-			func(pk *schema.PrimaryKey) {
+			func(a *schema.PrimaryKey) {
 				ops = append(ops, &op.DropColumnConstraint{
 					Target: op.TargetColumnConstraint{
 						Schema:     schem,
 						Table:      table,
 						Column:     src,
-						Constraint: pk.Node.(*ast.ColumnConstraint_PrimaryKey),
+						Constraint: a.Node.(*ast.ColumnConstraint_PrimaryKey),
 					},
 				})
 			},
-			func(pk *schema.PrimaryKey) {
+			func(b *schema.PrimaryKey) {
 				ops = append(ops, &op.AddColumnConstraint{
 					Target: op.TargetColumn{
 						Schema: schem,
 						Table:  table,
 						Column: src,
 					},
-					Constraint: pk.Node.(*ast.ColumnConstraint_PrimaryKey),
+					Constraint: b.Node.(*ast.ColumnConstraint_PrimaryKey),
 				})
+			},
+			func(a, b *schema.PrimaryKey) {
+				if a.Eq(b) {
+					return
+				}
+				panic("@TODO(woody): check if primary key has changed")
 			},
 		)
 
 		diffState(
 			a.Check, b.Check,
-			func(check *schema.Check) {
+			func(a *schema.Check) {
 				ops = append(ops, &op.DropColumnConstraint{
 					Target: op.TargetColumnConstraint{
 						Schema:     schem,
 						Table:      table,
 						Column:     src,
-						Constraint: check.Node.(*ast.ColumnConstraint_Check),
+						Constraint: a.Node.(*ast.ColumnConstraint_Check),
 					},
 				})
 			},
-			func(check *schema.Check) {
+			func(b *schema.Check) {
 				ops = append(ops, &op.AddColumnConstraint{
 					Target: op.TargetColumn{
 						Schema: schem,
 						Table:  table,
 						Column: src,
 					},
-					Constraint: check.Node.(*ast.ColumnConstraint_Check),
+					Constraint: b.Node.(*ast.ColumnConstraint_Check),
 				})
+			},
+			func(a, b *schema.Check) {
+				if a.Eq(b) {
+					return
+				}
+				panic("@TODO(woody): check if expr has changed")
 			},
 		)
 
 		diffState(
 			a.Collate, b.Collate,
-			func(check *schema.CollateConstraint) {
+			func(a *schema.CollateConstraint) {
 				ops = append(ops, &op.DropColumnConstraint{
 					Target: op.TargetColumnConstraint{
 						Schema:     schem,
 						Table:      table,
 						Column:     src,
-						Constraint: check.Node.(*ast.ColumnConstraint_Collate),
+						Constraint: a.Node.(*ast.ColumnConstraint_Collate),
 					},
 				})
 			},
-			func(check *schema.CollateConstraint) {
+			func(b *schema.CollateConstraint) {
 				ops = append(ops, &op.AddColumnConstraint{
 					Target: op.TargetColumn{
 						Schema: schem,
 						Table:  table,
 						Column: src,
 					},
-					Constraint: check.Node.(*ast.ColumnConstraint_Collate),
+					Constraint: b.Node.(*ast.ColumnConstraint_Collate),
 				})
+			},
+			func(a, b *schema.CollateConstraint) {
+				if a.Eq(b) {
+					return
+				}
+				panic("@TODO(woody): check if collation has changed")
 			},
 		)
 	}

@@ -116,7 +116,7 @@ func (p *SqliteParser) TableConstraint_PrimaryKey(constraintName *ast.Constraint
 	indexedCols := []ast.IndexedColumn{}
 
 	// take the first one manually incase it is followed by autoincrement
-	indexedCol := p.IndexedColumn(false)
+	indexedCol := p.IndexedColumn(true)
 	indexedCols = append(indexedCols, indexedCol)
 
 	if p.Current().Kind == token.TokenKind_Keyword_AUTOINCREMENT {
@@ -132,7 +132,7 @@ func (p *SqliteParser) TableConstraint_PrimaryKey(constraintName *ast.Constraint
 				p.Advance()
 				continue
 			} else {
-				indexedCol := p.IndexedColumn(false)
+				indexedCol := p.IndexedColumn(true)
 				indexedCols = append(indexedCols, indexedCol)
 			}
 		}

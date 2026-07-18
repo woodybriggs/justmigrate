@@ -39,8 +39,6 @@ func (r *Renderer) Render(report Report) string {
 	var tmp strings.Builder
 	// header
 	fmt.Fprintf(&out, " ┌─ %s\n", report.Kind)
-	fmt.Fprintf(&out, " │\n")
-
 	// labels can be from different sources, so we group
 	// labels by source and then find the source range.
 	type SourceCodeFileName string
@@ -106,7 +104,7 @@ func (r *Renderer) Render(report Report) string {
 		maxLine := srcLines[len(srcLines)-1].Line
 		r.gutterWidth = len(fmt.Sprintf("%d", maxLine)) + 1
 
-		canvas = append(canvas, renderLine{LineNum: 0, Content: fmt.Sprintf("%s", filename)})
+		canvas = append(canvas, renderLine{LineNum: 0, Content: string(filename)})
 
 		for _, li := range srcLines {
 			canvas = append(canvas, renderLine{LineNum: li.Line, Content: li.Content, IsSrc: true})
@@ -118,7 +116,6 @@ func (r *Renderer) Render(report Report) string {
 		}
 
 		fmt.Fprintf(&out, " ├─ %s:%d:%d\n", report.Location.FileName, report.Location.Line, report.Location.Col)
-		fmt.Fprintf(&out, " │\n")
 		if report.Message != "" {
 			fmt.Fprintf(&out, " │%s %s\n", r.inGutter("•"), report.Message)
 		}

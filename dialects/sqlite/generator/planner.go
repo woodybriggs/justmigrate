@@ -1,148 +1,176 @@
 package generator
 
 import (
-	"errors"
 	"fmt"
-	"os"
-	"woodybriggs/justmigrate/backend/diff"
-	"woodybriggs/justmigrate/backend/formatter"
+	"woodybriggs/justmigrate/backend/op"
 	"woodybriggs/justmigrate/backend/schema"
-	"woodybriggs/justmigrate/frontend/ast"
+	"woodybriggs/justmigrate/errext"
 )
 
 /*
 Plan takes a first pass of "dumb" operations (create table, drop table, etc.)
+and transforms them into a detailed, ordered, and valid execution plan for SQLite.
 
-	and transforms them into a detailed, ordered, and valid execution plan for SQLite.
+This process is particularly complex for SQLite due to its limited `ALTER TABLE`
+support, which often necessitates a full table recreation for many common modifications.
 
-	This process is particularly complex for SQLite due to its limited `ALTER TABLE`
-	support, which often necessitates a full table recreation for many common modifications.
+The planner's responsibilities include:
 
-	The planner's responsibilities include:
+ 1. Target Grouping & Squashing: Group incoming operations by their target table.
+    Evaluate the batch of operations for each table to determine if any single
+    operation requires a full table recreation. If so, squash all operations
+    for that table (even natively supported ones) into a single logical mutation
+    to prevent redundant disk writes and intermediate invalid states.
 
-	 1. Schema Graph Construction: Before planning, the planner must have access to a
-	    graph representation of the database schema, including tables, columns,
-	    foreign keys, indexes, and triggers. This graph is essential for
-	    dependency analysis.
+ 2. State Diffing & Lowering: Convert unsupported high-level operations into
+    dialect-supported SQL. For SQLite, this frequently triggers the "12-step"
+    table recreation strategy. The planner calculates the exact "Before" and
+    "After" table states to generate the sequence:
+    - Creating a temporary new table with the final desired schema.
+    - Generating an `INSERT INTO ... SELECT ...` statement, safely mapping
+    existing columns and handling renamed or dropped columns.
+    - Dropping the original table and renaming the new table.
+    - Re-creating any indexes and triggers that existed on the original table.
 
-	 2. Operation Validation: Determine if each requested operation is natively
-	    supported by the SQLite dialect. For example, `ADD COLUMN` is supported,
-	    but `DROP COLUMN` is only supported in recent SQLite versions and may need
-	    to be lowered.
+ 3. Dependency Analysis & DAG Construction: Build a Directed Acyclic Graph (DAG)
+    using the lowered, squashed operations. Edges are established based on schema
+    constraints (e.g., a table containing a foreign key depends on the referenced
+    parent table).
 
-	 3. Operation Lowering: Convert high-level, unsupported operations into a
-	    sequence of simpler, supported SQLite operations. The primary example is
-	    the "12-step" table recreation strategy for changes like dropping a column,
-	    altering a column's type, or adding a foreign key to an existing table.
-	    This involves:
-	    - Creating a new table with the desired schema.
-	    - Generating an `INSERT INTO ... SELECT ...` statement to migrate data
-	    from the old table to the new one, correctly mapping columns.
-	    - Dropping the original table.
-	    - Renaming the new table to the original's name.
-	    - Re-creating any indexes and triggers that existed on the original table.
+ 4. Topological Sorting (Execution Order): Traverse the DAG to determine a strict,
+    mathematically valid execution order. This guarantees that parent tables are
+    created before children, children are dropped before parents, and the database
+    never enters a temporarily invalid state.
 
-	 4. Dependency Analysis: Identify and resolve dependencies between operations
-	    using the schema graph. For instance, a table cannot be dropped if it is
-	    referenced by a foreign key in another table. The planner must ensure
-	    the foreign key constraint is dropped first or that the referencing table
-	    is also part of a recreation plan.
-
-	 5. Execution Ordering & Pragmas: Arrange the final sequence of operations
-	    into an executable order that satisfies all dependencies. This also involves
-	    injecting necessary session pragmas like `PRAGMA foreign_keys = OFF;` at the
-	    start and `PRAGMA foreign_keys = ON;` at the end of the migration.
-
-	 6. Transaction Grouping: Group related sequences of operations (like the
-	    entire table recreation process) into logical units that should be
-	    executed within a single transaction to ensure atomicity.
+ 5. Transaction Grouping & Pragmas: Group the topologically sorted operations into
+    logical transaction blocks to ensure atomicity. Inject required session-level
+    instructions, such as toggling `PRAGMA foreign_keys = OFF;` before executing
+    12-step recreations, and re-enabling it afterward.
 */
-func (gen *SqliteFormatter) Plan(src, tgt []ast.Statement, ops []diff.Op) ([]diff.Op, error) {
+func Plan(schem *schema.Schema, ops []op.Op) ([]op.Op, error) {
 	var errs []error
-	srcGraph, err := NewSchemaGraphFromStatements(src)
-	if err != nil {
-		if er, ok := err.(interface{ Unwrap() []error }); ok {
-			for _, e := range er.Unwrap() {
-				errs = append(errs, e)
-			}
-		}
-	}
-	tgtGraph, err := NewSchemaGraphFromStatements(tgt)
-	if err != nil {
-		if er, ok := err.(interface{ Unwrap() []error }); ok {
-			for _, e := range er.Unwrap() {
-				errs = append(errs, e)
-			}
-		}
-	}
-	_ = tgtGraph
-
-	if len(errs) > 0 {
-		return nil, errors.Join(errs...)
-	}
-
 	for _, op := range ops {
 		fmt.Printf("%T %+v", op, op)
 	}
 
-	var plan []diff.Op
-	for _, op := range ops {
-		switch o := op.(type) {
-		case *diff.DropColOp:
-			// can we be certain about this lookup?, given that the ops were generated from the schemas
-
-			// if deleting the column will break a foreign key somewhere
-			// we need to drop the fk constraint in that table
-			// for now I think we push a generic "drop constraint op"
-			// and we will have to do at least 2 passes over the plan
-			// to ensure that the plan is suitable for the dialect in this case 'sqlite'
-
-			ogTable := srcGraph.Tables[o.Table.Name]
-			childTables := srcGraph.Columns[ogTable.Name][o.Col.GetName()].DependantTables
-			for _, child := range childTables {
-				// for each dependant child
-				_ = child
+	loweredOps := []op.Op{}
+	opsByTable := groupOpsByTargetTable(ops)
+	for tableName, tableOps := range opsByTable {
+		if requiresRecreation(tableOps) {
+			oldTable := schem.Tables[tableName]
+			newTable, err := computeNewState(oldTable, tableOps)
+			if err != nil {
+				errs = append(errs, errext.UnwrapAll(err)...)
 			}
-
-			dropColumn(ogTable, o.Col)
-
-			fmtter := NewSqliteFormatter(false, formatter.NewCoreFormatter(os.Stdout, 80, "\"\""))
-			fmtter.VisitStatements([]ast.Statement{newTable})
-		case *diff.ChangeColTypeOp:
-			// These operations are not natively supported and require lowering to a
-			// full table recreation.
-			// The `lowerTableRecreation` helper would generate the sequence:
-			//  - CREATE new table
-			//  - INSERT INTO new_table SELECT ... FROM old_table
-			//  - DROP old_table
-			//  - RENAME new_table
-			//  - Re-create indexes and triggers
-			// recreateOps, err := gen.lowerTableRecreation(o.TableName, statements, schemaGraph)
-			// if err != nil {
-			// 	return nil, err
-			// }
-			// plan = append(plan, recreateOps...)
-			_ = o // Avoid unused variable error for this example
-
-		default:
-			// By default, assume the operation is natively supported (e.g., CreateTable,
-			// AddColumn, DropTable). These can be added directly to the plan.
-			// The final sorting step will handle their execution order.
-			plan = append(plan, o)
+			recreationOps := migrateTable(oldTable, newTable)
+			loweredOps = append(loweredOps, recreationOps...)
+		} else {
+			loweredOps = append(loweredOps, tableOps...)
 		}
 	}
 
-	// 3. Sort the final plan to respect dependencies (e.g., using a topological sort).
-	// sortedPlan, err := sortOps(plan, schemaGraph)
-
-	// 4. Add final pragmas.
-	// plan = append(plan, &PragmaOp{Key: "foreign_keys", Value: "ON"})
-	// plan = append(plan, &PragmaOp{Key: "foreign_key_check", Value: ""})
-
-	return plan, nil
+	return ops, nil
 }
 
-func dropColumn(table *schema.Table, colName schema.ColumnLike) {
-	// 1. check if any tables depend on this column (fk)
-	// 2. check if any
+func groupOpsByTargetTable(ops []op.Op) map[string][]op.Op {
+	grouped := make(map[string][]op.Op)
+
+	for _, o := range ops {
+		switch o := o.(type) {
+		case *op.AddColumn:
+			grouped[o.Target.Table.Name] = append(grouped[o.Target.Table.Name], o)
+		case *op.DropColumn:
+			grouped[o.Target.Table.Name] = append(grouped[o.Target.Table.Name], o)
+		case *op.RenameColumn:
+			grouped[o.Target.Table.Name] = append(grouped[o.Target.Table.Name], o)
+		case *op.ChangeColumnType:
+			grouped[o.Target.Table.Name] = append(grouped[o.Target.Table.Name], o)
+		case *op.AddColumnConstraint:
+			grouped[o.Target.Table.Name] = append(grouped[o.Target.Table.Name], o)
+		case *op.DropColumnConstraint:
+			grouped[o.Target.Table.Name] = append(grouped[o.Target.Table.Name], o)
+		case *op.AddTableConstraint:
+			grouped[o.Target.Table.Name] = append(grouped[o.Target.Table.Name], o)
+		case *op.DropTableConstraint:
+			grouped[o.Target.Table.Name] = append(grouped[o.Target.Table.Name], o)
+		case *op.AddTable:
+			grouped[o.Target.Schema.Name] = append(grouped[o.Target.Schema.Name], o)
+		case *op.DropTable:
+			grouped[o.Target.Schema.Name] = append(grouped[o.Target.Schema.Name], o)
+		case *op.RenameTable:
+			grouped[o.Target.Schema.Name] = append(grouped[o.Target.Schema.Name], o)
+		default:
+			panic("unreachable")
+		}
+	}
+
+	return grouped
+}
+
+func requiresRecreation(ops []op.Op) bool {
+	result := false
+
+Loop:
+	for _, o := range ops {
+		switch o.(type) {
+		case *op.AddColumn, *op.DropColumn, *op.RenameColumn:
+			continue
+		case *op.AddTable, *op.DropTable, *op.RenameTable:
+			continue
+		case *op.AddColumnConstraint, *op.DropColumnConstraint:
+			result = true
+			break Loop
+		case *op.AddTableConstraint, *op.DropTableConstraint:
+			result = true
+			break Loop
+		case *op.ChangeColumnType:
+			result = true
+			break Loop
+		}
+	}
+
+	return result
+}
+
+func computeNewState(oldTable *schema.Table, ops []op.Op) (*schema.Table, error) {
+	newTable := cloneTable(oldTable)
+
+	for _, o := range ops {
+		switch o := o.(type) {
+		case *op.AddColumn:
+			newTable.Columns[o.Column.GetName().String()] = o.Column
+		case *op.DropColumn:
+			delete(newTable.Columns, o.Target.Column.GetName().String())
+		case *op.RenameColumn:
+			newTable.Columns[o.Target.Column.GetName().String()].SetName(o.NewName)
+		case *op.AddColumnConstraint:
+			newTable.Columns[o.Target.Column.GetName().String()].AddConstraint(o.Constraint)
+		case *op.DropColumnConstraint:
+			newTable.Columns[o.Target.Column.GetName().String()].DropConstraint(o.Target.Constraint)
+		case *op.ChangeColumnType:
+			newTable.Columns[o.Target.Column.GetName().String()].SetType(o.NewType)
+		case *op.AddTableConstraint:
+			newTable.AddConstraint(o.Constraint)
+		case *op.DropTableConstraint:
+			newTable.DropConstraint(o.Target.Constraint)
+		}
+	}
+
+	// @TODO(woody): we would probably want to validate the new table
+	// but we don't have a table.Validate() function right now
+	// if we did have a function like that, it would likely takeover
+	// responsibility of wriring up the internal references to columns
+	// from fks and unique constraints
+
+	return newTable, nil
+}
+
+func cloneTable(src *schema.Table) *schema.Table {
+	panic("")
+}
+
+func migrateTable(oldTable *schema.Table, newTable *schema.Table) []op.Op {
+	ops := []op.Op{}
+
+	return ops
 }

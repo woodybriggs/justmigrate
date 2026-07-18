@@ -9,6 +9,7 @@ import (
 )
 
 type schemaBuilder struct {
+	SchemaName  string
 	Tables      map[string]*Table
 	Columns     map[string]map[string]ColumnLike
 	ForeignKeys []*ForeignKey
@@ -47,7 +48,7 @@ func (builder *schemaBuilder) Schema() (*Schema, error) {
 					WithLocation(colID.FileLoc).
 					WithLabels(
 						report.LabelFromIdentifier(colID, "this column does not exist in the referenced table"),
-						report.LabelFromIdentifier(foreignTable.CreateTable.TableIdentifier.ObjectName, "referenced table"),
+						report.LabelFromIdentifier(foreignTable.Node.TableIdentifier.ObjectName, "referenced table"),
 					)
 				builder.errors = append(builder.errors, err)
 				continue
@@ -60,6 +61,7 @@ func (builder *schemaBuilder) Schema() (*Schema, error) {
 	}
 
 	return &Schema{
+		Name:        builder.SchemaName,
 		Tables:      builder.Tables,
 		Columns:     builder.Columns,
 		ForeignKeys: builder.ForeignKeys,
@@ -97,7 +99,7 @@ func (builder *schemaBuilder) AddTable(table *Table) {
 					NewReport("invalid foreign key definition").
 					WithLocation(toCol.FileLoc).
 					WithLabels(
-						report.LabelFromIdentifier(foreignTable.CreateTable.TableIdentifier.ObjectName, fmt.Sprintf("this referenced table does not define column '%v'", toCol.Text)),
+						report.LabelFromIdentifier(foreignTable.Node.TableIdentifier.ObjectName, fmt.Sprintf("this referenced table does not define column '%v'", toCol.Text)),
 						report.LabelFromIdentifier(toCol, "this column does not exist in the referenced table"),
 					)
 				builder.errors = append(builder.errors, err)
@@ -114,6 +116,7 @@ func (builder *schemaBuilder) AddTable(table *Table) {
 }
 
 type Schema struct {
+	Name        string
 	Tables      map[string]*Table
 	Indexes     map[string]*Index
 	Columns     map[string]map[string]ColumnLike
@@ -137,9 +140,10 @@ func (schema *Schema) Eq(otherAny any) bool {
 	return tablesEq && indexesEq
 }
 
-func SchemaFromAst(statements []ast.Statement) (*Schema, error) {
+func SchemaFromAst(name string, statements []ast.Statement) (*Schema, error) {
 
 	builder := &schemaBuilder{
+		SchemaName:  name,
 		Tables:      map[string]*Table{},
 		Columns:     map[string]map[string]ColumnLike{},
 		ForeignKeys: make([]*ForeignKey, 0),
