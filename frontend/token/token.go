@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strings"
 )
 
 type TokenKind int
@@ -165,10 +166,14 @@ const (
 
 	TokenKind_Keyword_ADD
 	TokenKind_Keyword_DROP
+	TokenKind_Keyword_RENAME
+	TokenKind_Keyword_TO
 
 	TokenKind_Keyword_OR
 	TokenKind_Keyword_BETWEEN
 	TokenKind_Keyword_AND
+	TokenKind_Keyword_INSERT
+	TokenKind_Keyword_INTO
 )
 
 const (
@@ -246,6 +251,10 @@ const (
 	Keyword_OR            string = "or"
 	Keyword_BETWEEN       string = "between"
 	Keyword_AND           string = "and"
+	Keyword_RENAME        string = "rename"
+	Keyword_TO            string = "to"
+	Keyword_INSERT        string = "insert"
+	Keyword_INTO          string = "into"
 )
 
 type MapIndex[TKey comparable, TVal comparable] struct {
@@ -347,7 +356,11 @@ var KeywordIndex = NewIndex[string, TokenKind]().
 	Add(Keyword_WHERE, TokenKind_Keyword_WHERE).
 	Add(Keyword_OR, TokenKind_Keyword_OR).
 	Add(Keyword_BETWEEN, TokenKind_Keyword_BETWEEN).
-	Add(Keyword_AND, TokenKind_Keyword_AND)
+	Add(Keyword_AND, TokenKind_Keyword_AND).
+	Add(Keyword_RENAME, TokenKind_Keyword_RENAME).
+	Add(Keyword_TO, TokenKind_Keyword_TO).
+	Add(Keyword_INSERT, TokenKind_Keyword_INSERT).
+	Add(Keyword_INTO, TokenKind_Keyword_INTO)
 
 var ConstaintKeywords = map[TokenKind]bool{
 	TokenKind_Keyword_CONSTRAINT: true,
@@ -421,6 +434,24 @@ func (t Token) DebugString() string {
 		return str
 	}
 	return t.Text
+}
+
+func Keyword(kword string) Token {
+	kind, ok := KeywordIndex.GetValue(strings.ToLower(kword))
+	if !ok {
+		panic("invalid keyword")
+	}
+	return Token{
+		Text: kword,
+		Kind: kind,
+	}
+}
+
+func Identifier(ident string) Token {
+	return Token{
+		Text: ident,
+		Kind: TokenKind_Identifier,
+	}
 }
 
 type Cost int

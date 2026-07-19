@@ -140,6 +140,26 @@ func (schema *Schema) Eq(otherAny any) bool {
 	return tablesEq && indexesEq
 }
 
+func (schema *Schema) Clone() *Schema {
+
+	builder := &schemaBuilder{
+		SchemaName:  schema.Name,
+		Tables:      map[string]*Table{},
+		Columns:     map[string]map[string]ColumnLike{},
+		ForeignKeys: make([]*ForeignKey, 0),
+	}
+
+	for _, table := range schema.Tables {
+		builder.AddTable(table.Clone())
+	}
+
+	cloned, err := builder.Schema()
+	if err != nil {
+		panic(err)
+	}
+	return cloned
+}
+
 func SchemaFromAst(name string, statements []ast.Statement) (*Schema, error) {
 
 	builder := &schemaBuilder{

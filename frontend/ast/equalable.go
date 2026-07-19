@@ -95,6 +95,88 @@ func (node *AlterTable) Eq(otherAny any) bool {
 	return true
 }
 
+func (node *SelectFromTable) Eq(otherAny any) bool {
+	other, ok := As[SelectFromTable](otherAny)
+	if !ok {
+		return false
+	}
+
+	if len(node.ResultsColumn) != len(other.ResultsColumn) {
+		return false
+	}
+
+	for i := range len(node.ResultsColumn) {
+		if !node.ResultsColumn[i].Eq(other.ResultsColumn[i]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (node *InsertInto) Eq(otherAny any) bool {
+	other, ok := As[InsertInto](otherAny)
+	if !ok {
+		return false
+	}
+
+	if len(node.Columns) != len(other.Columns) {
+		return false
+	}
+
+	if !CheckPtr(node.Or, other.Or) {
+		return false
+	}
+
+	if !CheckPtr(node.CatalogObject, other.CatalogObject) {
+		return false
+	}
+
+	if !CheckPtr(node.Values, other.Values) {
+		return false
+	}
+
+	for i := range len(node.Columns) {
+		if !node.Columns[i].Eq(other.Columns[i]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (node *InsertOr) Eq(otherAny any) bool {
+	other, ok := As[InsertOr](otherAny)
+	if !ok {
+		return false
+	}
+
+	return node.OrVerb.Eq(other.OrVerb)
+}
+
+func (node *InsertIntoValuesSelect) Eq(otherAny any) bool {
+	other, ok := As[InsertIntoValuesSelect](otherAny)
+	if !ok {
+		return false
+	}
+
+	if len(node.UpsertClauses) != len(other.UpsertClauses) {
+		return false
+	}
+
+	if !CheckPtr(node.Select, other.Select) {
+		return false
+	}
+
+	for i := range len(node.UpsertClauses) {
+		if !node.UpsertClauses[i].Eq(other.UpsertClauses[i]) {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (node *DropColumn) Eq(otherAny any) bool {
 	other, ok := As[DropColumn](otherAny)
 	if !ok {
@@ -111,6 +193,15 @@ func (node *AddColumn) Eq(otherAny any) bool {
 	}
 
 	return Check(&node.ColumnDefinition, &other.ColumnDefinition)
+}
+
+func (node *RenameTable) Eq(otherAny any) bool {
+	other, ok := As[RenameTable](otherAny)
+	if !ok {
+		return false
+	}
+
+	return CheckPtr(node.NewTableName, other.NewTableName)
 }
 
 func (node *CreateTable) Eq(otherAny any) bool {
@@ -854,6 +945,40 @@ func (node *ForeignKeyDeferrable) Eq(otherAny any) bool {
 	if !CheckPtr(node.Deferrable, other.Deferrable) {
 		return false
 	}
+
+	return true
+}
+
+func (node *InsertIntoValuesExprs) Eq(otherAny any) bool {
+	other, ok := As[InsertIntoValuesExprs](otherAny)
+	if !ok {
+		return false
+	}
+
+	if !CheckPtr(node.UpsertClause, other.UpsertClause) {
+		return false
+	}
+
+	if len(node.Values) != len(other.Values) {
+		return false
+	}
+
+	for i := range len(node.Values) {
+		if !node.Values[i].Eq(other.Values[i]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (node *UpsertClause) Eq(otherAny any) bool {
+	other, ok := As[UpsertClause](otherAny)
+	if !ok {
+		return false
+	}
+	_ = other
+	panic("TODO(woody): this isn't implemented because UpsertClause doesn't have all its members yet")
 
 	return true
 }

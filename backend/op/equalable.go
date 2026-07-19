@@ -200,3 +200,20 @@ func (op *AddTableConstraint) Eq(otherAny any) bool {
 
 	return op.Constraint.Eq(other.Constraint)
 }
+
+func (op *MigrateData) Eq(otherAny any) bool {
+	other, ok := otherAny.(*MigrateData)
+	if !ok {
+		return false
+	}
+
+	if !op.SrcTarget.Eq(other.SrcTarget) {
+		return false
+	}
+
+	if !op.DstTarget.Eq(other.DstTarget) {
+		return false
+	}
+
+	return true
+}

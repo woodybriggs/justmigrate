@@ -34,6 +34,24 @@ func (f *SqliteFormatter) VisitStatements(node []ast.Statement) {
 	}
 }
 
+func (f *SqliteFormatter) VisitDropTable(node *ast.DropTable) {
+	f.Group(func() {
+		f.Keyword("DROP")
+		f.Space()
+		f.Keyword("TABLE")
+		f.Space()
+
+		if node.IfExists != nil {
+			f.Keyword("IF")
+			f.Space()
+			f.Keyword("EXISTS")
+			f.Space()
+		}
+
+		node.TableIdentifier.Accept(f)
+	})
+}
+
 func (f *SqliteFormatter) VisitCreateTable(node *ast.CreateTable) {
 	f.Group(func() {
 		f.Keyword("CREATE")
@@ -158,6 +176,19 @@ func (f *SqliteFormatter) VisitTypeName(node *ast.TypeName) {
 	}
 }
 
+func (f *SqliteFormatter) VisitColumnConstraintCheck(node *ast.ColumnConstraint_Check) {
+	if node.Name != nil {
+		f.Keyword("CONSTRAINT")
+		f.Space()
+		node.Name.Name.Accept(f)
+	}
+	f.Keyword("CHECK")
+	f.Space()
+	f.Rune('(')
+	node.Expr.Accept(f)
+	f.Rune(')')
+}
+
 func (f *SqliteFormatter) VisitColumnConstraintNotNull(node *ast.ColumnConstraint_NotNull) {
 	f.Keyword("NOT")
 	f.Space()
@@ -203,9 +234,25 @@ func (f *SqliteFormatter) VisitColumnConstraintForeignKey(node *ast.ColumnConstr
 		f.Keyword("CONSTRAINT")
 		f.Space()
 		node.Name.Name.Accept(f)
+		f.Space()
 	}
 
 	f.VisitForeignKeyClause(&node.FkClause)
+}
+
+func (f *SqliteFormatter) VisitTableConstraintCheck(node *ast.TableConstraint_Check) {
+	if node.Name != nil {
+		f.Keyword("CONSTRAINT")
+		f.Space()
+		node.Name.Name.Accept(f)
+		f.Space()
+	}
+
+	f.Keyword("CHECK")
+	f.Space()
+	f.Rune('(')
+	node.Expr.Accept(f)
+	f.Rune(')')
 }
 
 func (f *SqliteFormatter) VisitTableConstraintUnique(node *ast.TableConstraint_Unique) {
@@ -387,4 +434,147 @@ func (f *SqliteFormatter) VisitForeignKeyActionNoAction(node *ast.NoAction) {
 
 func (f *SqliteFormatter) VisitLiteralSignedInteger(node *ast.LiteralSignedInteger) {
 	f.Text(node.Token.Text)
+}
+
+func (f *SqliteFormatter) VisitBinaryOp(node *ast.BinaryOp) {
+	node.Lhs.Accept(f)
+	f.Space()
+	f.Text(node.Operator.Text)
+	f.Space()
+	node.Rhs.Accept(f)
+}
+
+func (f *SqliteFormatter) VisitColumnConstraintDefault(node *ast.ColumnConstraint_Default) {
+	if node.Name != nil {
+		f.Keyword("CONSTRAINT")
+		f.Space()
+		node.Name.Name.Accept(f)
+		f.Space()
+	}
+
+	f.Keyword("DEFAULT")
+	f.Space()
+	node.Default.Accept(f)
+}
+
+func (f *SqliteFormatter) VisitLiteralString(node *ast.LiteralString) {
+	f.Rune('\'')
+	f.Text(node.Value)
+	f.Rune('\'')
+}
+
+func (f *SqliteFormatter) VisitColumnConstraintUnique(node *ast.ColumnConstraint_Unique) {
+	if node.Name != nil {
+		f.Keyword("CONSTRAINT")
+		f.Space()
+		node.Name.Name.Accept(f)
+		f.Space()
+	}
+
+	f.Keyword("UNIQUE")
+
+	if node.ConflictClause != nil {
+		f.Space()
+		f.Keyword("ON")
+		f.Space()
+		f.Keyword("CONFLICT")
+		f.Space()
+		f.Keyword(node.ConflictClause.Action.Text)
+		f.Space()
+	}
+}
+
+func (f *SqliteFormatter) VisitTableAlterationRenameTable(node *ast.RenameTable) {
+	f.Keyword("RENAME")
+	f.Space()
+	f.Keyword("TO")
+	f.Space()
+	node.NewTableName.Accept(f)
+}
+
+func (f *SqliteFormatter) VisitInsertInto(node *ast.InsertInto) {
+	f.Group(func() {
+		f.Keyword("INSERT")
+		f.Space()
+		f.Keyword("INTO")
+		f.Space()
+
+		if node.Or != nil {
+			// node.Or.Accept(f)
+			f.Space()
+		}
+
+		node.CatalogObject.Accept(f)
+		f.Space()
+
+		if len(node.Columns) > 0 {
+			f.Rune('(')
+			f.Line()
+			f.Indent(func() {
+				for i, name := range node.Columns {
+					name.Accept(f)
+					if i < len(node.Columns)-1 {
+						f.Rune(',')
+						f.Line()
+					}
+				}
+			})
+			f.Line()
+			f.Rune(')')
+		}
+		f.Space()
+
+		node.Values.Accept(f)
+
+		// @TODO(woody): we don't have returning clause in InsertInto statements yet
+		// if node.ReturningClause != nil {
+		// 	node.ReturningClause.Accept(f)
+		// }
+	})
+}
+
+func (f *SqliteFormatter) VisitInsertIntoValuesSelect(node *ast.InsertIntoValuesSelect) {
+	node.Select.Accept(f)
+	for i := range len(node.UpsertClauses) {
+		node.UpsertClauses[i].Accept(f)
+		if i < len(node.UpsertClauses)-1 {
+			f.Space()
+		}
+	}
+}
+
+func (f *SqliteFormatter) VisitSelectFromTable(node *ast.SelectFromTable) {
+	f.Keyword("SELECT")
+	f.Space()
+
+	f.Indent(func() {
+		for i, resCol := range node.ResultsColumn {
+			resCol.Accept(f)
+
+			if i < len(node.ResultsColumn)-1 {
+				f.Rune(',')
+				f.Line()
+			}
+		}
+	})
+	f.Line()
+	f.Keyword("FROM")
+	f.Space()
+	node.From.Accept(f)
+}
+
+func (f *SqliteFormatter) VisitUpsertClause(node *ast.UpsertClause) {
+	f.Keyword("ON")
+	f.Space()
+	f.Keyword("CONFLICT")
+	f.Space()
+
+	f.Keyword("DO")
+	f.Space()
+
+	panic("not implemented")
+}
+
+func (f *SqliteFormatter) VisitLiteralNull(node *ast.LiteralNull) {
+	f.Keyword("NULL")
 }

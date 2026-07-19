@@ -6,14 +6,15 @@ type Statement interface {
 	nodeStatement()
 }
 
-func (node *Pragma) nodeStatement()            {}
-func (node *BeginTransaction) nodeStatement()  {}
-func (node *CommitTransaction) nodeStatement() {}
-func (node *Select) nodeStatement()            {}
-func (node *CreateTable) nodeStatement()       {}
-func (node *AlterTable) nodeStatement()        {}
-func (node *DropTable) nodeStatement()         {}
-func (node *CreateTrigger) nodeStatement()     {}
+func (*Pragma) nodeStatement()            {}
+func (*BeginTransaction) nodeStatement()  {}
+func (*CommitTransaction) nodeStatement() {}
+func (*SelectFromTable) nodeStatement()   {}
+func (*CreateTable) nodeStatement()       {}
+func (*AlterTable) nodeStatement()        {}
+func (*DropTable) nodeStatement()         {}
+func (*CreateTrigger) nodeStatement()     {}
+func (*InsertInto) nodeStatement()        {}
 
 type TableAlteration interface {
 	Equalable
@@ -21,8 +22,9 @@ type TableAlteration interface {
 	tableAlteration()
 }
 
-func (node *AddColumn) tableAlteration()  {}
-func (node *DropColumn) tableAlteration() {}
+func (*AddColumn) tableAlteration()   {}
+func (*DropColumn) tableAlteration()  {}
+func (*RenameTable) tableAlteration() {}
 
 // func (node *CreateView) nodeStatement()        {}
 
@@ -133,3 +135,13 @@ type NumericLiteral interface {
 func (node *LiteralFloat) nodeNumericLiteral()           {}
 func (node *LiteralSignedInteger) nodeNumericLiteral()   {}
 func (node *LiteralUnsignedInteger) nodeNumericLiteral() {}
+
+type InsertIntoValues interface {
+	Equalable
+	nodeInsertIntoValues()
+	Accept(Visitor)
+}
+
+func (*InsertIntoValuesSelect) nodeInsertIntoValues()   {}
+func (*InsertIntoValuesExprs) nodeInsertIntoValues()    {}
+func (*InsertIntoValuesDefaults) nodeInsertIntoValues() {}

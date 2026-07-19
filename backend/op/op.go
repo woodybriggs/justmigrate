@@ -10,6 +10,7 @@ type Op interface {
 	ast.Equalable
 }
 
+func (*MigrateData) isOp()          {}
 func (*AddTable) isOp()             {}
 func (*DropTable) isOp()            {}
 func (*RenameTable) isOp()          {}
@@ -72,4 +73,10 @@ type AddColumnConstraint struct {
 
 type DropColumnConstraint struct {
 	Target TargetColumnConstraint
+}
+
+type MigrateData struct {
+	SrcTarget TargetTable
+	DstTarget TargetTable
+	Ops       []Op
 }

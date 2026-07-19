@@ -72,11 +72,35 @@ type DropTable struct {
 	TableIdentifier CatalogObjectIdentifier
 }
 
+func MakeDropTable(
+	ifExists *IfExists,
+	tableIdent CatalogObjectIdentifier,
+) *DropTable {
+	return &DropTable{
+		IfExists:        ifExists,
+		TableIdentifier: tableIdent,
+	}
+}
+
 type AlterTable struct {
 	AlterKeyword    Keyword
 	TableKeyword    Keyword
 	TableIdentifier *CatalogObjectIdentifier
 	Alteration      TableAlteration
+}
+
+func MakeAlterTable(
+	alterKeyword Keyword,
+	tableKeyword Keyword,
+	tableIdent *CatalogObjectIdentifier,
+	alteration TableAlteration,
+) *AlterTable {
+	return &AlterTable{
+		AlterKeyword:    alterKeyword,
+		TableKeyword:    tableKeyword,
+		TableIdentifier: tableIdent,
+		Alteration:      alteration,
+	}
 }
 
 type AddColumn struct {
@@ -91,6 +115,24 @@ type DropColumn struct {
 	ColumnName    Identifier
 }
 
+type RenameTable struct {
+	RenameKeyword Keyword
+	ToKeyword     Keyword
+	NewTableName  *CatalogObjectIdentifier
+}
+
+func MakeRenameTableAlteration(
+	renameKeyword Keyword,
+	toKeyword Keyword,
+	newTableName *CatalogObjectIdentifier,
+) *RenameTable {
+	return &RenameTable{
+		RenameKeyword: renameKeyword,
+		ToKeyword:     toKeyword,
+		NewTableName:  newTableName,
+	}
+}
+
 type Pragma struct {
 	Name  CatalogObjectIdentifier
 	Value Expr
@@ -100,7 +142,78 @@ type BeginTransaction struct{}
 
 type CommitTransaction struct{}
 
-type Select struct{}
+type SelectFromTable struct {
+	SelectKeyword Keyword
+	ResultsColumn []Expr
+	From          *CatalogObjectIdentifier
+	Where         Expr
+}
+
+func MakeSelectFromTable(
+	selectKeyword Keyword,
+	resultColumn []Expr,
+	from *CatalogObjectIdentifier,
+	where Expr,
+) *SelectFromTable {
+	return &SelectFromTable{
+		SelectKeyword: selectKeyword,
+		ResultsColumn: resultColumn,
+		From:          from,
+		Where:         where,
+	}
+}
+
+type UpsertClause struct {
+	OnKeyword       Keyword
+	ConflictKeyword Keyword
+	DoKeyword       Keyword
+}
+
+type InsertIntoValuesSelect struct {
+	Select        *SelectFromTable
+	UpsertClauses []UpsertClause
+}
+
+type InsertIntoValuesExprs struct {
+	Values       []Expr
+	UpsertClause *UpsertClause
+}
+
+type InsertIntoValuesDefaults struct {
+	DefaultKeyword Keyword
+}
+
+type InsertOr struct {
+	OrKeyword Keyword
+	OrVerb    Keyword // abort, fail, ignore, replace, rollback
+}
+
+type InsertInto struct {
+	InsertKeyword Keyword
+	Or            *InsertOr
+	IntoKeyword   Keyword
+	CatalogObject *CatalogObjectIdentifier
+	Columns       []Identifier
+	Values        InsertIntoValues
+}
+
+func MakeInsertInto(
+	insertKeyword Keyword,
+	or *InsertOr,
+	intoKeyword Keyword,
+	catalogObject *CatalogObjectIdentifier,
+	columns []Identifier,
+	values InsertIntoValues,
+) *InsertInto {
+	return &InsertInto{
+		InsertKeyword: insertKeyword,
+		Or:            or,
+		IntoKeyword:   intoKeyword,
+		CatalogObject: catalogObject,
+		Columns:       columns,
+		Values:        values,
+	}
+}
 
 type CreateTable struct {
 	CreateKeyword   Keyword

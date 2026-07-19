@@ -57,7 +57,7 @@ func PrimaryKeyFromTableConstraintAst(
 	}
 
 	// for each indexed column we check that it is a valid column
-	for i, indexedCol := range constraint.IndexedColumns {
+	for _, indexedCol := range constraint.IndexedColumns {
 		ident, ok := indexedCol.Subject.(*ast.Identifier)
 		if !ok {
 			errs = append(errs, report.
@@ -97,8 +97,6 @@ func PrimaryKeyFromTableConstraintAst(
 			)
 			continue
 		}
-
-		pk.ResolvedColumns[i] = col
 	}
 
 	joinedErrs := errors.Join(errs...)
@@ -175,6 +173,8 @@ type ForeignKey struct {
 		Equalable
 	}
 
+	Name *ast.Identifier
+
 	// FromTable is the table defining the foreign key constraint (the "child" table).
 	FromTable   *Table
 	FromColumns []ColumnLike
@@ -216,6 +216,10 @@ func ForeignKeyFromColumnConstraintAst(colName *ast.Identifier, constraints *Col
 		},
 	}
 
+	if constraint.Name != nil {
+		constraints.FK.Name = &constraint.Name.Name
+	}
+
 	return nil
 }
 
@@ -230,8 +234,12 @@ func ForeignKeyFromTableConstraintAst(table *Table, constraint *ast.TableConstra
 			FromTable:   table.Node.TableIdentifier,
 			FromColumns: constraint.Columns,
 			ToTable:     &constraint.FkClause.ForeignTable,
-			ToColumns:   make([]ast.Identifier, len(constraint.FkClause.ForeignColumns)),
+			ToColumns:   constraint.FkClause.ForeignColumns,
 		},
+	}
+
+	if constraint.Name != nil {
+		result.Name = &constraint.Name.Name
 	}
 
 	// resolve the local columns
@@ -259,6 +267,29 @@ func ForeignKeyFromTableConstraintAst(table *Table, constraint *ast.TableConstra
 	}
 
 	return result, errors.Join(errs...)
+}
+
+func ForeignKeyClauseAstFromForeignKey(fk *ForeignKey) *ast.ForeignKeyClause {
+
+	if true {
+		panic("TODO(woody): we need to convert resolved columns to []ast.Identifier")
+	}
+
+	return ast.MakeForeignKeyClause(
+		ast.Keyword(token.Keyword("REFERENCES")),
+		*ast.MakeCatalogObjectIdentifier(
+			nil,
+			// TODO(woody): we probably need to store schema name inside table
+			*ast.MakeIdentifier(token.Token{Text: fk.ToTable.Name, Kind: token.TokenKind_Identifier}),
+		),
+		token.Token{Text: "(", Kind: token.TokenKind_LParen},
+		fk.Unresolved.ToColumns,
+		token.Token{Text: ")", Kind: token.TokenKind_RParen},
+		// TODO(woody) we dont store any of this in the foreign key at the moment
+		nil,
+		nil,
+		nil,
+	)
 }
 
 type Unique struct {

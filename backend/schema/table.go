@@ -7,6 +7,7 @@ import (
 	"woodybriggs/justmigrate/errext"
 	"woodybriggs/justmigrate/frontend/ast"
 	"woodybriggs/justmigrate/frontend/report"
+	"woodybriggs/justmigrate/frontend/token"
 )
 
 type TableConstraints struct {
@@ -14,6 +15,42 @@ type TableConstraints struct {
 	FKs     []*ForeignKey
 	Checks  []*Check
 	Uniques []*Unique
+}
+
+func (tc TableConstraints) Clone() TableConstraints {
+	clone := TableConstraints{}
+
+	if tc.PK != nil {
+		pk := *tc.PK
+		pk.IndexedColumns = slices.Clone(tc.PK.IndexedColumns)
+		clone.PK = &pk
+	}
+
+	if tc.FKs != nil {
+		clone.FKs = make([]*ForeignKey, len(tc.FKs))
+		for i, fk := range tc.FKs {
+			f := *fk
+			clone.FKs[i] = &f
+		}
+	}
+
+	if tc.Checks != nil {
+		clone.Checks = make([]*Check, len(tc.Checks))
+		for i, check := range tc.Checks {
+			c := *check
+			clone.Checks[i] = &c
+		}
+	}
+
+	if tc.Uniques != nil {
+		clone.Uniques = make([]*Unique, len(tc.Uniques))
+		for i, unique := range tc.Uniques {
+			u := *unique
+			clone.Uniques[i] = &u
+		}
+	}
+
+	return clone
 }
 
 type Table struct {
@@ -108,6 +145,105 @@ func (table *Table) DropConstraint(constraint ast.TableConstraint) error {
 	return nil
 }
 
+func (table *Table) ResolveInternalReferences() error {
+	errs := []error{}
+
+	for _, fk := range table.Constraints.FKs {
+		fk.FromTable = table
+
+		fk.FromColumns = make([]ColumnLike, len(fk.Unresolved.FromColumns))
+		for i, fromCol := range fk.Unresolved.FromColumns {
+			col, ok := table.Columns[fromCol.String()]
+			if !ok {
+				err := report.
+					NewReport("invalid foreign key definition").
+					WithLocation(fromCol.FileLoc).
+					WithLabels(
+						report.LabelFromIdentifier(table.Node.TableIdentifier.ObjectName, fmt.Sprintf("this table does not define column '%v'", fromCol.Text)),
+						report.LabelFromIdentifier(fromCol, "this column does not exist"),
+					)
+
+				errs = append(errs, err)
+				continue
+			}
+
+			fk.FromColumns[i] = col
+		}
+	}
+
+	if table.Constraints.PK != nil {
+		pk := table.Constraints.PK
+		pk.ResolvedColumns = make([]ColumnLike, len(pk.IndexedColumns))
+		for i, indexedCol := range pk.IndexedColumns {
+			ident, ok := indexedCol.Subject.(*ast.Identifier)
+			if !ok {
+				errs = append(errs, report.
+					NewReport("semantic error").
+					WithLocation(report.LocationFromExpr(indexedCol.Subject)).
+					WithMessage("expressions not supported in primary key indexed columns").
+					WithLabels(
+						report.LabelFromExpr(indexedCol.Subject, "this must be a column name within the table"),
+					),
+				)
+				continue
+			}
+
+			col, ok := table.Columns[ident.String()]
+			if !ok {
+				errs = append(errs, report.
+					NewReport("semantic error").
+					WithLocation(report.LocationFromExpr(indexedCol.Subject)).
+					WithMessage("column does not exist in table").
+					WithLabels(
+						report.LabelFromIdentifier(table.Node.TableIdentifier.ObjectName, "this table"),
+						report.LabelFromExpr(indexedCol.Subject, "does not declare this column"),
+					),
+				)
+				continue
+			}
+
+			pk.ResolvedColumns[i] = col
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func (t *Table) Clone() *Table {
+	clone := &Table{
+		Node:        t.Node,
+		Name:        t.Name,
+		Temporary:   t.Temporary,
+		Columns:     make(map[string]ColumnLike, len(t.Columns)),
+		Constraints: t.Constraints.Clone(),
+		Indexes:     slices.Clone(t.Indexes),
+	}
+
+	for name, col := range t.Columns {
+		switch c := col.(type) {
+		case *Column:
+			clone.Columns[name] = c.Clone()
+		case *GeneratedColumn:
+			clone.Columns[name] = c.Clone()
+		}
+	}
+
+	if err := clone.ResolveInternalReferences(); err != nil {
+		panic(fmt.Sprintf("resolveInternalReferences failed during clone: %v", err))
+	}
+
+	return clone
+}
+
+func (t *Table) CatalogObjectIdentifier() *ast.CatalogObjectIdentifier {
+	var schemaName *ast.Identifier = nil
+
+	return ast.MakeCatalogObjectIdentifier(
+		schemaName,
+		*ast.MakeIdentifier(token.Identifier(t.Name)),
+	)
+}
+
 func TableFromAst(statement *ast.CreateTable) (*Table, error) {
 	// this is where we validate that the table is "correct" by itself
 	errs := []error{}
@@ -187,36 +323,199 @@ func TableFromAst(statement *ast.CreateTable) (*Table, error) {
 		}
 	}
 
-	// now that the table has been fully defined, we need to resolve the internal wiring of fk
-	for _, fk := range table.Constraints.FKs {
-		// column defined fks need to be updated now that the table is fully defined
-		if fk.FromTable == nil {
-			fk.FromTable = table
-		}
-
-		fk.FromColumns = make([]ColumnLike, len(fk.Unresolved.FromColumns))
-		for i, fromCol := range fk.Unresolved.FromColumns {
-			col, ok := table.Columns[fromCol.String()]
-			if !ok {
-				// this is an symantic error, the local column does not exist
-				err := report.
-					NewReport("invalid foreign key definition").
-					WithLocation(fromCol.FileLoc).
-					WithLabels(
-						report.LabelFromIdentifier(table.Node.TableIdentifier.ObjectName, fmt.Sprintf("this table does not define column '%v'", fromCol.Text)),
-						report.LabelFromIdentifier(fromCol, "this column does not exist"),
-					)
-
-				errs = append(errs, err)
-				// @TODO(woody): this is a possible bug, we aren't added the failed column to the resolved columns
-				// but there is a slot ready for it
-				continue
-			}
-
-			// we have a column, so we can mark it as resolved
-			fk.FromColumns[i] = col
-		}
+	// now that the table has been fully defined, we need to resolve the internal wiring of fk and pk
+	if err := table.ResolveInternalReferences(); err != nil {
+		errs = append(errs, errext.UnwrapAll(err)...)
 	}
 
 	return table, errors.Join(errs...)
+}
+
+func CreateTableAstFromTable(schemaName *ast.Identifier, table *Table) *ast.CreateTable {
+
+	var tempKeyword *ast.Keyword = nil
+	if table.Temporary {
+		tempKeyword = ast.MakeKeyword(token.Token{
+			Text: "TEMPORARY",
+			Kind: token.TokenKind_Keyword_TEMPORARY,
+		})
+	}
+
+	// TODO(woody): we don't store if not exists anywhere in schema at the moment
+	// and we can't rely on the CreateTable node referenced in the schema struct
+	// because this maybe a clone that has deviated from the orignial syntax tree
+	var ifNotExists *ast.IfNotExists = nil
+	if false {
+		ifNotExists = ast.MakeIfNotExists(
+			ast.Keyword(token.Token{Text: "IF", Kind: token.TokenKind_Keyword_IF}),
+			ast.Keyword(token.Token{Text: "NOT", Kind: token.TokenKind_Keyword_NOT}),
+			ast.Keyword(token.Token{Text: "EXISTS", Kind: token.TokenKind_Keyword_EXISTS}),
+		)
+	}
+
+	var tableOptions *ast.TableOptions = nil
+	if false {
+		tableOptions = ast.MakeTableOptions(
+			ast.MakeKeyword(token.Token{Text: "STRICT", Kind: token.TokenKind_Keyword_STRICT}),
+			ast.MakeWithoutRowId(
+				ast.Keyword(token.Token{Text: "WITHOUT", Kind: token.TokenKind_Keyword_WITHOUT}),
+				ast.Keyword(token.Token{Text: "ROWID", Kind: token.TokenKind_Keyword_ROWID}),
+			),
+		)
+	}
+
+	var tableDefinition *ast.TableDefinition = TableDefinitionAstFromTable(table)
+
+	return ast.MakeCreateTable(
+		ast.Keyword(token.Token{Text: "CREATE", Kind: token.TokenKind_Keyword_CREATE}),
+		tempKeyword,
+		ast.Keyword(token.Token{Text: "TABLE", Kind: token.TokenKind_Keyword_TABLE}),
+		ifNotExists,
+		ast.MakeCatalogObjectIdentifier(
+			schemaName,
+			ast.Identifier(token.Token{Text: table.Name, Kind: token.TokenKind_Identifier}),
+		),
+		tableDefinition,
+		tableOptions,
+	)
+}
+
+func TableDefinitionAstFromTable(table *Table) *ast.TableDefinition {
+
+	columnDefinitions := []ast.ColumnDefinition{}
+	for _, column := range table.Columns {
+		colDef := ColumnDefinitionAstFromColumn(column)
+		columnDefinitions = append(columnDefinitions, *colDef)
+	}
+
+	tableConstraints := TableConstraintsAstFromTableConstraints(table.Constraints)
+
+	return &ast.TableDefinition{
+		LParen:            token.Token{Text: "(", Kind: token.TokenKind_LParen},
+		ColumnDefinitions: columnDefinitions,
+		TableConstraints:  tableConstraints,
+		RParent:           token.Token{Text: ")", Kind: token.TokenKind_RParen},
+	}
+}
+
+func TableConstraintsAstFromTableConstraints(constraints TableConstraints) []ast.TableConstraint {
+	result := []ast.TableConstraint{}
+
+	if constraints.PK != nil {
+
+		// only if its a table constraint
+		if _, ok := constraints.PK.Node.(*ast.TableConstraint_PrimaryKey); ok {
+
+			var constraintName *ast.ConstraintName = nil
+			if constraints.PK.Name != nil {
+				constraintName = &ast.ConstraintName{
+					ConstraintKeyword: ast.Keyword(token.Keyword("CONSTRAINT")),
+					Name:              *constraints.PK.Name,
+				}
+			}
+
+			// TODO(woody): we don't store autoincrement for sqlite anywhere
+			var autoIncrement *ast.Keyword = nil
+
+			result = append(result, ast.MakeTableConstraintPrimaryKey(
+				constraintName,
+				ast.Keyword(token.Keyword("primary")),
+				ast.Keyword(token.Keyword("key")),
+				token.Token{Text: "(", Kind: token.TokenKind_LParen},
+				constraints.PK.IndexedColumns,
+				token.Token{Text: ")", Kind: token.TokenKind_RParen},
+				ConflictClauseAstFromConflictAction(constraints.PK.ConflictClause),
+				autoIncrement,
+			))
+		}
+	}
+
+	for _, fk := range constraints.FKs {
+
+		// skip if it originated from a column constraint
+		if _, ok := fk.Node.(*ast.ColumnConstraint_ForeignKey); ok {
+			continue
+		}
+
+		var constraintName *ast.ConstraintName = nil
+		if fk.Name != nil {
+			constraintName = &ast.ConstraintName{
+				ConstraintKeyword: ast.Keyword(token.Keyword("CONSTRAINT")),
+				Name:              *fk.Name,
+			}
+		}
+		result = append(result, ast.MakeTableConstraintForeignKey(
+			constraintName,
+			ast.Keyword(token.Keyword("foreign")),
+			ast.Keyword(token.Keyword("key")),
+			token.Token{Text: "(", Kind: token.TokenKind_LParen},
+			fk.Unresolved.FromColumns,
+			token.Token{Text: ")", Kind: token.TokenKind_RParen},
+			ForeignKeyClauseAstFromForeignKey(fk),
+		))
+	}
+
+	for _, check := range constraints.Checks {
+
+		// skip if it originated from a column constraint
+		if _, ok := check.Node.(*ast.ColumnConstraint_Check); ok {
+			continue
+		}
+
+		var constraintName *ast.ConstraintName = nil
+		if check.Name != nil {
+			constraintName = &ast.ConstraintName{
+				ConstraintKeyword: ast.Keyword(token.Keyword("CONSTRAINT")),
+				Name:              *check.Name,
+			}
+		}
+		result = append(result, ast.MakeTableConstraintCheck(
+			constraintName,
+			ast.Keyword(token.Keyword("check")),
+			token.Token{Text: "(", Kind: token.TokenKind_LParen},
+			check.Expr,
+			token.Token{Text: ")", Kind: token.TokenKind_RParen},
+		))
+	}
+
+	for _, unique := range constraints.Uniques {
+
+		// skip if it originated from a column constraint
+		if _, ok := unique.Node.(*ast.ColumnConstraint_Unique); ok {
+			continue
+		}
+
+		var constraintName *ast.ConstraintName = nil
+		if unique.Name != nil {
+			constraintName = &ast.ConstraintName{
+				ConstraintKeyword: ast.Keyword(token.Keyword("CONSTRAINT")),
+				Name:              *unique.Name,
+			}
+		}
+		result = append(result, ast.MakeTableConstraintUnique(
+			constraintName,
+			token.Token{Text: "(", Kind: token.TokenKind_LParen},
+			unique.IndexedColumns,
+			token.Token{Text: ")", Kind: token.TokenKind_RParen},
+			ConflictClauseAstFromConflictAction(unique.ConflictAction),
+		))
+	}
+
+	return result
+}
+
+func DropTableAstFromTable(schema *Schema, table *Table) ast.Statement {
+
+	var schemaName *ast.Identifier = nil
+	if schema != nil && schema.Name != "" {
+		schemaName = ast.MakeIdentifier(token.Token{Text: schema.Name, Kind: token.TokenKind_Identifier})
+	}
+
+	return ast.MakeDropTable(
+		nil,
+		ast.CatalogObjectIdentifier{
+			SchemaName: schemaName,
+			ObjectName: ast.Identifier(token.Token{Text: table.Name, Kind: token.TokenKind_Identifier}),
+		},
+	)
 }

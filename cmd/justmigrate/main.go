@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"woodybriggs/justmigrate/backend/diff"
+	"woodybriggs/justmigrate/backend/formatter"
 	schema "woodybriggs/justmigrate/backend/schema"
 	"woodybriggs/justmigrate/dialects/sqlite/generator"
 	"woodybriggs/justmigrate/dialects/sqlite/parser"
@@ -152,13 +153,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// // validate, reoreder and optimize the ops
-	// {
-
-	// }
-
 	// generate the schema changes needed from the ops
-	ops, err = generator.Plan(schemaA, ops)
+	plan, err := generator.Plan(schemaA, schemaB, ops)
 	type multiError interface {
 		Error() string
 		Unwrap() []error
@@ -169,9 +165,22 @@ func main() {
 				fmt.Println(report)
 			}
 		}
+		os.Exit(1)
 	}
 
-	for _, op := range ops {
-		fmt.Printf("%T, %+v\n", op, op)
+	stmts, err := generator.Translate(schemaA, plan)
+	if err != nil {
+		if errs, ok := errors.AsType[multiError](err); ok {
+			for _, report := range errs.Unwrap() {
+				fmt.Println(report)
+			}
+		}
+		os.Exit(1)
 	}
+
+	fmtter := generator.NewSqliteFormatter(
+		true,
+		formatter.NewCoreFormatter(os.Stdout, 80, "[]"),
+	)
+	fmtter.VisitStatements(stmts)
 }

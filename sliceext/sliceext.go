@@ -1,5 +1,7 @@
 package sliceext
 
+import "slices"
+
 type Cloneable[T any] interface {
 	Clone() T
 }
@@ -25,4 +27,14 @@ func CloneValueDeep[S ~[]E, E any, P interface {
 		res[i] = *ptr.Clone()
 	}
 	return res
+}
+
+func FindFunc[S ~[]E, E any](s S, find func(E) bool) (E, bool) {
+	idx := slices.IndexFunc(s, find)
+	if idx >= 0 {
+		return s[idx], true
+	}
+
+	var nilVal E
+	return nilVal, false
 }
