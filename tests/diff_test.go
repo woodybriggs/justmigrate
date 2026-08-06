@@ -4,13 +4,13 @@ import (
 	"slices"
 	"testing"
 
-	"woodybriggs/justmigrate/backend/diff"
-	"woodybriggs/justmigrate/backend/op"
-	"woodybriggs/justmigrate/backend/schema"
-	"woodybriggs/justmigrate/dialects/sqlite/parser"
-	"woodybriggs/justmigrate/frontend/ast"
-	"woodybriggs/justmigrate/frontend/lexer"
-	"woodybriggs/justmigrate/frontend/token"
+	"justmigrate/internal/backend/diff"
+	"justmigrate/internal/backend/op"
+	"justmigrate/internal/backend/schema"
+	"justmigrate/internal/dialects/sqlite/parser"
+	"justmigrate/internal/frontend/ast"
+	"justmigrate/internal/frontend/lexer"
+	"justmigrate/internal/frontend/token"
 )
 
 var schemaSourceA string = ` 
@@ -97,52 +97,17 @@ func loadSchema(filename string, src string) (*schema.Schema, error) {
 	return schema, err
 }
 
-var NotKeyword *ast.Keyword = ast.MakeKeyword(
-	token.Token{
-		Text: "not",
-		Kind: token.TokenKind_Keyword_NOT,
-	},
-)
-
-var NullKeyword *ast.Keyword = ast.MakeKeyword(
-	token.Token{
-		Text: "null",
-		Kind: token.TokenKind_Keyword_NULL,
-	},
-)
-
-var UniqueKeyword *ast.Keyword = ast.MakeKeyword(
-	token.Token{
-		Text: "unique",
-		Kind: token.TokenKind_Keyword_UNIQUE,
-	},
-)
-
-var CheckKeyword *ast.Keyword = ast.MakeKeyword(
-	token.Token{
-		Text: "check",
-		Kind: token.TokenKind_Keyword_CHECK,
-	},
-)
-
-var DefaultKeyword *ast.Keyword = ast.MakeKeyword(
-	token.Token{
-		Text: "default",
-		Kind: token.TokenKind_Keyword_DEFAULT,
-	},
-)
-
 var statusColumnDefinition = ast.MakeColumnDefinition(
-	*ast.MakeIdentifier(token.Token{Text: "status", Kind: token.TokenKind_Identifier}),
+	ast.Identifier(token.Identifier("status")),
 	ast.MakeTypeName(
-		*ast.MakeIdentifier(token.Token{Text: "TEXT", Kind: token.TokenKind_Identifier}),
+		ast.Identifier(token.Identifier("TEXT")),
 		nil,
 		nil,
 	),
 	[]ast.ColumnConstraint{
 		ast.MakeColumnConstraintDefault(
 			nil,
-			*DefaultKeyword,
+			ast.Keyword(token.Keyword("DEFAULT")),
 			ast.MakeLiteralString(
 				token.Token{Text: "cart", Kind: token.TokenKind_StringLiteral},
 				"cart",
@@ -165,9 +130,7 @@ func Test_DiffSchema(t *testing.T) {
 		t.FailNow()
 	}
 
-	differ := diff.Diff{}
-
-	ops, err := differ.DiffSchema(schemaA, schemaB)
+	ops, err := diff.DiffSchema(schemaA, schemaB)
 	if err != nil {
 		t.Fatalf("failed to diff schema %s", err)
 	}
@@ -199,8 +162,8 @@ func Test_DiffSchema(t *testing.T) {
 				Column: schemaA.Columns["users"]["first_name"],
 				Constraint: ast.MakeColumnConstraintNotNull(
 					nil,
-					*NotKeyword,
-					*NullKeyword,
+					ast.Keyword(token.Keyword("NOT")),
+					ast.Keyword(token.Keyword("NULL")),
 					nil,
 				),
 			},
@@ -213,8 +176,8 @@ func Test_DiffSchema(t *testing.T) {
 			},
 			Constraint: ast.MakeColumnConstraintNotNull(
 				nil,
-				*NotKeyword,
-				*NullKeyword,
+				ast.Keyword(token.Keyword("NOT")),
+				ast.Keyword(token.Keyword("NULL")),
 				nil,
 			),
 		},
@@ -226,7 +189,7 @@ func Test_DiffSchema(t *testing.T) {
 			},
 			Constraint: ast.MakeColumnConstraintUnique(
 				nil,
-				*UniqueKeyword,
+				ast.Keyword(token.Keyword("UNIQUE")),
 				nil,
 			),
 		},
@@ -250,14 +213,12 @@ func Test_DiffSchema(t *testing.T) {
 				Table:  schemaA.Tables["orders"],
 				Constraint: ast.MakeTableConstraintCheck(
 					&ast.ConstraintName{
-						Name: *ast.MakeIdentifier(token.Token{Text: "valid_total", Kind: token.TokenKind_Identifier}),
+						Name: ast.Identifier(token.Identifier("valid_total")),
 					},
-					*CheckKeyword,
+					ast.Keyword(token.Keyword("CHECK")),
 					token.Token{Kind: token.TokenKind_LParen},
 					ast.MakeBinaryOpExpr(
-						ast.MakeIdentifier(
-							token.Token{Text: "total_amount", Kind: token.TokenKind_Identifier},
-						),
+						ast.MakeIdentifier(token.Identifier("total_amount")),
 						token.Token{Text: ">=", Kind: token.TokenKind_gte},
 						ast.MakeLiteralSignedInteger(
 							token.Token{Text: "0", Kind: token.TokenKind_IntegerNumericLiteral},
@@ -277,7 +238,7 @@ func Test_DiffSchema(t *testing.T) {
 				&ast.ConstraintName{
 					Name: *ast.MakeIdentifier(token.Token{Text: "valid_checkout", Kind: token.TokenKind_Identifier}),
 				},
-				*CheckKeyword,
+				ast.Keyword(token.Keyword("CHECK")),
 				token.Token{Kind: token.TokenKind_LParen},
 				ast.MakeBinaryOpExpr(
 					ast.MakeBinaryOpExpr(

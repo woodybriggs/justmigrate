@@ -1,19 +1,28 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
-	"woodybriggs/justmigrate/backend/diff"
-	"woodybriggs/justmigrate/backend/formatter"
-	schema "woodybriggs/justmigrate/backend/schema"
-	"woodybriggs/justmigrate/dialects/sqlite/generator"
-	"woodybriggs/justmigrate/dialects/sqlite/parser"
-	"woodybriggs/justmigrate/frontend/ast"
-	"woodybriggs/justmigrate/frontend/lexer"
-	"woodybriggs/justmigrate/frontend/report"
+	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/urfave/cli/v3"
+
+	sqlite "justmigrate/internal/dialects/sqlite"
+
+	"justmigrate/internal/backend/diff"
+	"justmigrate/internal/backend/formatter"
+	"justmigrate/internal/backend/schema"
+	"justmigrate/internal/dialects/sqlite/generator"
+	"justmigrate/internal/dialects/sqlite/parser"
+	"justmigrate/internal/frontend/ast"
+	"justmigrate/internal/frontend/lexer"
+	"justmigrate/internal/frontend/report"
 )
 
 var (
@@ -79,108 +88,189 @@ func astFromReader(r io.Reader, sourceName string) (lexer.SourceCode, []ast.Stat
 	return sourceCode, statements, nil
 }
 
-func main() {
+var (
+	databaseURL    string   = ""
+	databaseDriver string   = "sqlite3"
+	outputFile     *os.File = os.Stdout
+	schemaFilePath string   = "schema.sql"
+)
 
-	var err error
+func pull(ctx context.Context, cmd *cli.Command) (err error) {
 
-	// load the current state of the connected database into ast
-	// databaseURL := "resources/database.db"
-	// conn, err := sql.Open("sqlite3", databaseURL)
-	// if err != nil {
-	// 	log.Panicln(err)
-	// }
-
-	// db := &sqlite.Sqlite{DB: conn, FileName: databaseURL}
-	// source, err := db.ExportDataDefinitions()
-	// if err != nil {
-	// 	fmt.Fprintf(os.Stderr, "unable to export data defintions from db %v", err)
-	// 	os.Exit(1)
-	// }
-
-	// dbSourceReader := strings.NewReader(source)
-	// _, srcAst, err := astFromReader(dbSourceReader, databaseURL)
-	// if err != nil {
-	// 	fmt.Fprintf(os.Stderr, "ast from database failed with err %v", err)
-	// 	os.Exit(1)
-	// }
-
-	// load the current state of the target schema file into ast
-	fileNameA := "./resources/two/a.sql"
-	fileA, err := os.Open(fileNameA)
+	conn, err := sql.Open(databaseDriver, databaseURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "open file failed with err %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error: unable to connect to the database: %w", err)
 	}
 
-	_, srcAst, err := astFromReader(fileA, fileNameA)
+	db := sqlite.Sqlite{
+		DB:       conn,
+		FileName: databaseURL,
+	}
+	source, err := db.ExportDataDefinitions()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ast from file failed with err %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error: unable to export data defintions from db: %w", err)
 	}
 
-	fileNameB := "./resources/two/b.sql"
-	fileB, err := os.Open(fileNameB)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "open file failed with err %v\n", err)
-		os.Exit(1)
+	if cmd.String("output-file") != "" {
+		outputFile, err = os.OpenFile(cmd.String("output-file"), os.O_RDWR|os.O_CREATE, 0644)
+		if err != nil {
+			return fmt.Errorf("error: unable to open file for writing %s: %w", cmd.String("output-file"), err)
+		}
 	}
 
-	_, tgtAst, err := astFromReader(fileB, fileNameB)
+	fmt.Fprint(outputFile, source)
+	defer outputFile.Close()
+
+	return err
+}
+
+func push(ctx context.Context, cmd *cli.Command) error {
+
+	conn, err := sql.Open(databaseDriver, databaseURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ast from file failed with err %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error: unable to connect to the database: %w", err)
+	}
+
+	db := sqlite.Sqlite{
+		DB:       conn,
+		FileName: databaseURL,
+	}
+	source, err := db.ExportDataDefinitions()
+	if err != nil {
+		return fmt.Errorf("error: unable to export data defintions from db: %w", err)
+	}
+
+	dbSourceReader := strings.NewReader(source)
+	_, srcAst, err := astFromReader(dbSourceReader, databaseURL)
+	if err != nil {
+		return fmt.Errorf("error: parsing ast from database failed: %w", err)
+	}
+
+	schemaFilePath := cmd.String("schema-file")
+	schemaFile, err := os.Open(schemaFilePath)
+	if err != nil {
+		return fmt.Errorf("error: open file failed with err %w", err)
+	}
+
+	_, tgtAst, err := astFromReader(schemaFile, schemaFilePath)
+	if err != nil {
+		return fmt.Errorf("error: parsing ast from file failed: %w", err)
 	}
 
 	schemaA, err := schema.SchemaFromAst("main", srcAst)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid schema\n%v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error: invalid schema\n%w\n", err)
 	}
 
 	schemaB, err := schema.SchemaFromAst("main", tgtAst)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid schema\n%v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error: invalid schema\n%w\n", err)
 	}
 
-	_, _ = schemaA, schemaB
-
 	// perform a "diff" of the two ast and procude a set of transform ops
-	differ := diff.Diff{}
-	ops, err := differ.DiffSchema(schemaA, schemaB)
+	ops, err := diff.DiffSchema(schemaA, schemaB)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "diff schema failed with err %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error: diff'ing schema failed: %w", err)
 	}
 
 	// generate the schema changes needed from the ops
 	plan, err := generator.Plan(schemaA, schemaB, ops)
-	type multiError interface {
-		Error() string
-		Unwrap() []error
-	}
 	if err != nil {
-		if errs, ok := errors.AsType[multiError](err); ok {
+		if errs, ok := errors.AsType[interface {
+			Error() string
+			Unwrap() []error
+		}](err); ok {
 			for _, report := range errs.Unwrap() {
 				fmt.Println(report)
 			}
 		}
-		os.Exit(1)
+		return err
 	}
 
 	stmts, err := generator.Translate(schemaA, plan)
 	if err != nil {
-		if errs, ok := errors.AsType[multiError](err); ok {
+		if errs, ok := errors.AsType[interface {
+			Error() string
+			Unwrap() []error
+		}](err); ok {
 			for _, report := range errs.Unwrap() {
 				fmt.Println(report)
 			}
 		}
-		os.Exit(1)
+		return err
 	}
+
+	builder := strings.Builder{}
 
 	fmtter := generator.NewSqliteFormatter(
 		true,
-		formatter.NewCoreFormatter(os.Stdout, 80, "[]"),
+		formatter.NewCoreFormatter(&builder, 80, "[]"),
 	)
 	fmtter.VisitStatements(stmts)
+
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("error: unable to obtain transaction handle on database: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, builder.String())
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("error: transaction failed, rolled backed: %w", err)
+	}
+	tx.Commit()
+
+	fmt.Print(builder.String())
+
+	return nil
+}
+
+func main() {
+
+	cmd := &cli.Command{
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "database-url",
+				Usage:       "url or filepath to database",
+				Destination: &databaseURL,
+			},
+			&cli.StringFlag{
+				Name:        "database-driver",
+				Usage:       "name of database driver (sqlite3)",
+				Destination: &databaseDriver,
+			},
+		},
+		Commands: []*cli.Command{
+			&cli.Command{
+				Name:   "pull",
+				Usage:  "connect to database and pull existing schema into file",
+				Action: pull,
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "output-file",
+						Value: "schema.sql",
+						Usage: "where to save the pulled schema",
+					},
+				},
+			},
+			&cli.Command{
+				Name:   "push",
+				Usage:  "compares current db schema with target schema executes statements to migrate",
+				Action: push,
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "schema-file",
+						Value: "schema.sql",
+						Usage: "the target schema data definitions",
+					},
+				},
+			},
+		},
+	}
+
+	if err := cmd.Run(context.Background(), os.Args); err != nil {
+		fmt.Fprintln(os.Stdout, err)
+		os.Exit(1)
+	}
+	return
 }
