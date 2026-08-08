@@ -27,7 +27,29 @@ func (pk *PrimaryKey) Eq(otherAny any) bool {
 		return false
 	}
 
-	return pk.Node.Eq(other.Node)
+	if !ast.CheckPtr(pk.Name, other.Name) {
+		return false
+	}
+
+	if len(pk.IndexedColumns) != len(other.IndexedColumns) {
+		return false
+	}
+
+	for i := range len(pk.IndexedColumns) {
+		if !pk.IndexedColumns[i].Eq(other.IndexedColumns[i]) {
+			return false
+		}
+	}
+
+	if pk.Order != other.Order {
+		return false
+	}
+
+	if pk.ConflictClause != other.ConflictClause {
+		return false
+	}
+
+	return true
 }
 
 func PrimaryKeyFromTableConstraintAst(
@@ -272,8 +294,9 @@ func ForeignKeyFromTableConstraintAst(table *Table, constraint *ast.TableConstra
 
 func ForeignKeyClauseAstFromForeignKey(fk *ForeignKey) *ast.ForeignKeyClause {
 
-	if true {
-		panic("@TODO(woody): we need to convert resolved columns to []ast.Identifier")
+	columnIdents := []ast.Identifier{}
+	for _, colLike := range fk.ToColumns {
+		columnIdents = append(columnIdents, *colLike.GetName())
 	}
 
 	return ast.MakeForeignKeyClause(
@@ -284,7 +307,7 @@ func ForeignKeyClauseAstFromForeignKey(fk *ForeignKey) *ast.ForeignKeyClause {
 			*ast.MakeIdentifier(token.Token{Text: fk.ToTable.Name, Kind: token.TokenKind_Identifier}),
 		),
 		token.Token{Text: "(", Kind: token.TokenKind_LParen},
-		fk.Unresolved.ToColumns,
+		columnIdents,
 		token.Token{Text: ")", Kind: token.TokenKind_RParen},
 		// @TODO(woody) we dont store any of this in the foreign key at the moment
 		nil,
@@ -498,7 +521,7 @@ func (def *Default) Eq(otherAny any) bool {
 		return false
 	}
 
-	return other.Node.Eq(other.Node)
+	return def.Expr.Eq(other.Expr)
 }
 
 func DefaultFromColumnConstraint(constraints *ColumnConstraints, constraint *ast.ColumnConstraint_Default) error {

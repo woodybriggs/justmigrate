@@ -208,6 +208,8 @@ func push(ctx context.Context, cmd *cli.Command) error {
 	)
 	fmtter.VisitStatements(stmts)
 
+	fmt.Print(builder.String())
+
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("error: unable to obtain transaction handle on database: %w", err)
@@ -219,8 +221,6 @@ func push(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("error: transaction failed, rolled backed: %w", err)
 	}
 	tx.Commit()
-
-	fmt.Print(builder.String())
 
 	return nil
 }

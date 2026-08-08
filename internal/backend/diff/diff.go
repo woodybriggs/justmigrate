@@ -182,6 +182,10 @@ func diffState[T any](a, b *T, ifA, ifB func(*T), cmp func(a, b *T)) {
 		ifB(b)
 	} else if a != nil && b != nil {
 		cmp(a, b)
+	} else if a == nil && b == nil {
+		// do nothing
+	} else {
+		panic("unreachable")
 	}
 }
 

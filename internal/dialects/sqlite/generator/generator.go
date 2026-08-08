@@ -441,7 +441,14 @@ func (f *SqliteFormatter) VisitBinaryOp(node *ast.BinaryOp) {
 	f.Space()
 	f.Text(node.Operator.Text)
 	f.Space()
-	node.Rhs.Accept(f)
+
+	if _, ok := node.Rhs.(ast.ExprList); ok {
+		f.Rune('(')
+		node.Rhs.Accept(f)
+		f.Rune(')')
+	} else {
+		node.Rhs.Accept(f)
+	}
 }
 
 func (f *SqliteFormatter) VisitColumnConstraintDefault(node *ast.ColumnConstraint_Default) {
@@ -454,7 +461,17 @@ func (f *SqliteFormatter) VisitColumnConstraintDefault(node *ast.ColumnConstrain
 
 	f.Keyword("DEFAULT")
 	f.Space()
-	node.Default.Accept(f)
+
+	// @TODO(woody): we should know already if the expr needs to be wrapped in parens
+	switch node.Default.(type) {
+	case *ast.FunctionCall:
+		f.Rune('(')
+		node.Default.Accept(f)
+		f.Rune(')')
+	default:
+		node.Default.Accept(f)
+	}
+
 }
 
 func (f *SqliteFormatter) VisitLiteralString(node *ast.LiteralString) {
@@ -577,4 +594,21 @@ func (f *SqliteFormatter) VisitUpsertClause(node *ast.UpsertClause) {
 
 func (f *SqliteFormatter) VisitLiteralNull(node *ast.LiteralNull) {
 	f.Keyword("NULL")
+}
+
+func (f *SqliteFormatter) VisitFunctionCall(node *ast.FunctionCall) {
+	f.Text(node.Name.Text)
+	f.Rune('(')
+	node.Args.Accept(f)
+	f.Rune(')')
+}
+
+func (f *SqliteFormatter) VisitExprList(node ast.ExprList) {
+	for i, expr := range node {
+		expr.Accept(f)
+		if i < len(node)-1 {
+			f.Rune(',')
+			f.Space()
+		}
+	}
 }

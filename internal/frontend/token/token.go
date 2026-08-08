@@ -257,7 +257,7 @@ const (
 	Keyword_TO            string = "to"
 	Keyword_INSERT        string = "insert"
 	Keyword_INTO          string = "into"
-	Keyword_COLUMN		  string = "column"
+	Keyword_COLUMN        string = "column"
 )
 
 type MapIndex[TKey comparable, TVal comparable] struct {
@@ -484,8 +484,7 @@ func (t Token) InsertionCost() Cost {
 	case TokenKind_Identifier:
 		return CostMid
 	default:
-
-		fmt.Fprintf(os.Stderr, "insertion cost not defined for '%s'", t.String())
+		fmt.Fprintf(os.Stderr, "insertion cost not defined for '%s'", t.Kind.DebugString())
 		os.Exit(1)
 		return 0
 	}
@@ -507,6 +506,8 @@ func (t Token) DeletionCost() Cost {
 	case TokenKind_IntegerNumericLiteral:
 		return CostHigh
 	default:
-		panic(fmt.Sprintf("insertion cost not defined for '%s'", t.String()))
+		fmt.Fprintf(os.Stderr, "deletion cost not defined for '%s'", t.Kind.DebugString())
+		os.Exit(1)
+		return 0
 	}
 }

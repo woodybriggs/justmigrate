@@ -3,12 +3,12 @@ package parser
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"justmigrate/internal/frontend/ast"
 	"justmigrate/internal/frontend/lexer"
 	"justmigrate/internal/frontend/parser"
 	"justmigrate/internal/frontend/report"
 	"justmigrate/internal/frontend/token"
+	"strconv"
 )
 
 var ErrNotImplemented = errors.New("not implemented")
@@ -853,6 +853,30 @@ func (p *SqliteParser) BetweenExpr(minBindingPower int) ast.Expr {
 	)
 }
 
+func (p *SqliteParser) InExpr(minBindingPower int) ast.Expr {
+
+	p.Expect('(')
+	exprs := []ast.Expr{}
+
+	for !p.EndOfFile() {
+
+		if p.Current().Kind == ')' {
+			break
+		}
+		if p.Current().Kind == ',' {
+			p.Advance()
+			continue
+		}
+
+		expr := p.Expr(0)
+		exprs = append(exprs, expr)
+	}
+
+	p.Expect(')')
+
+	return ast.ExprList(exprs)
+}
+
 func (p *SqliteParser) Term() ast.Expr {
 	switch p.Current().Kind {
 	case token.TokenKind_StringLiteral:
@@ -863,9 +887,36 @@ func (p *SqliteParser) Term() ast.Expr {
 		p.Advance()
 		return result
 	case token.TokenKind_Identifier:
-		result := ast.Identifier(p.Current())
+		ident := ast.MakeIdentifier(p.Current())
+		var result ast.Expr = ident
 		p.Advance()
-		return &result
+
+		if p.Current().Kind == '(' {
+			p.Advance()
+
+			funcArgs := []ast.Expr{}
+
+			for !p.EndOfFile() {
+				if p.Current().Kind == ',' {
+					p.Advance()
+					continue
+				} else if p.Current().Kind == ')' {
+					break
+				} else {
+					funcArg := p.Expr(0)
+					funcArgs = append(funcArgs, funcArg)
+				}
+			}
+
+			result = ast.MakeFunctionCall(
+				*ident,
+				funcArgs,
+			)
+
+			p.Expect(')')
+		}
+
+		return result
 	case token.TokenKind_IntegerNumericLiteral:
 		result, err := ast.TokenToLiteral(p.Current())
 		if err != nil {
@@ -887,6 +938,8 @@ func (p *SqliteParser) OpParser(op token.Token) (func(bindingPower int) ast.Expr
 	switch op.Kind {
 	case token.TokenKind_Keyword_BETWEEN:
 		return p.BetweenExpr, true
+	case token.TokenKind_Keyword_IN:
+		return p.InExpr, true
 	default:
 		return p.Expr, true
 	}
@@ -907,6 +960,8 @@ func (p *SqliteParser) OperatorBindingPower(tok token.Token) (bp ast.BindingPowe
 	case '=':
 		return ast.BindingPower{L: 20, R: 21}, true
 	case token.TokenKind_Keyword_BETWEEN:
+		return ast.BindingPower{L: 20, R: 21}, true
+	case token.TokenKind_Keyword_IN:
 		return ast.BindingPower{L: 20, R: 21}, true
 	case token.TokenKind_Keyword_OR:
 		return ast.BindingPower{L: 10, R: 11}, true

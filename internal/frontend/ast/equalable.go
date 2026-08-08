@@ -30,8 +30,8 @@ func CheckPtr(a, b Equalable) bool {
 		return true
 	}
 
-	aIsNil := a == nil || (reflect.ValueOf(a).Kind() == reflect.Ptr && reflect.ValueOf(a).IsNil())
-	bIsNil := b == nil || (reflect.ValueOf(b).Kind() == reflect.Ptr && reflect.ValueOf(b).IsNil())
+	aIsNil := a == nil || (reflect.ValueOf(a).Kind() == reflect.Pointer && reflect.ValueOf(a).IsNil())
+	bIsNil := b == nil || (reflect.ValueOf(b).Kind() == reflect.Pointer && reflect.ValueOf(b).IsNil())
 
 	if aIsNil && bIsNil {
 		return true
@@ -432,15 +432,11 @@ func (node *IndexedColumn) Eq(otherAny any) bool {
 		return false
 	}
 
-	if !Check(node.Collation, other.Collation) {
-		return false
-	}
-
 	if !CheckPtr(node.Collation, other.Collation) {
 		return false
 	}
 
-	if CheckPtr(node.Order, other.Order) {
+	if !CheckPtr(node.Order, other.Order) {
 		return false
 	}
 
@@ -605,6 +601,7 @@ func (node *ColumnConstraint_NotNull) Eq(otherAny any) bool {
 }
 
 func (node *ColumnConstraint_Default) Eq(otherAny any) bool {
+
 	other, ok := As[ColumnConstraint_Default](otherAny)
 	if !ok {
 		return false

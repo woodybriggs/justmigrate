@@ -2,14 +2,14 @@ package parser
 
 import (
 	"fmt"
-	"maps"
-	"slices"
-	"strings"
 	"justmigrate/internal/datastructures"
 	"justmigrate/internal/frontend/ast"
 	"justmigrate/internal/frontend/lexer"
 	"justmigrate/internal/frontend/report"
 	"justmigrate/internal/frontend/token"
+	"maps"
+	"slices"
+	"strings"
 )
 
 type ParseContext struct {
@@ -80,6 +80,9 @@ func (p *Parser) Expect(kind token.TokenKind) token.Token {
 			report.
 				NewReport(
 					"parse error",
+				).
+				WithLocation(
+					p.currentToken.FileLoc,
 				).
 				WithLabels(
 					report.LabelFromToken(p.currentToken, fmt.Sprintf("expected '%s' got '%s'", kind.DebugString(), p.currentToken.DebugString())),

@@ -1098,6 +1098,16 @@ type FunctionCall struct {
 	Args ExprList
 }
 
+func MakeFunctionCall(
+	name Identifier,
+	args []Expr,
+) *FunctionCall {
+	return &FunctionCall{
+		Name: name,
+		Args: args,
+	}
+}
+
 type ColumnName struct {
 	Schema *Identifier
 	Table  *Identifier
